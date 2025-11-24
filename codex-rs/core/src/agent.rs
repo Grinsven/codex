@@ -121,10 +121,14 @@ impl AgentRegistry {
             .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
             .join(".codex");
 
-        let canonical_home = home_codex.canonicalize().unwrap_or(home_codex);
+        let is_in_home_codex = if let Ok(canonical_home) = home_codex.canonicalize() {
+            canonical.starts_with(&canonical_home)
+        } else {
+            false
+        };
 
         // Security check: path must be within ~/.codex or the base directory
-        if !canonical.starts_with(&canonical_home) && !canonical.starts_with(&canonical_base) {
+        if !is_in_home_codex && !canonical.starts_with(&canonical_base) {
             return Err(anyhow::anyhow!(
                 "Security error: Prompt file must be within ~/.codex or the configured agents directory"
             ));

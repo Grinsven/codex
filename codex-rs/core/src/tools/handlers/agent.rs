@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use rand::Rng;
 use serde::Deserialize;
-use tracing::warn;
 
 use crate::Prompt;
 use crate::ResponseEvent;
@@ -26,7 +25,6 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::SessionSource;
 
 #[derive(Debug, Deserialize)]
 struct AgentCall {
@@ -103,14 +101,6 @@ impl ToolHandler for AgentHandler {
             plan_item_id,
         } = parsed;
 
-        // Prevent recursion by refusing to run if the tool list already excludes agent tool.
-        if matches!(turn.client.get_session_source(), SessionSource::SubAgent(_)) {
-            warn!("agent tool recursion detected");
-            return Err(FunctionCallError::RespondToModel(
-                "Agents cannot spawn other agents".to_string(),
-            ));
-        }
-
         let registry = agent_registry(session.as_ref());
         let agent_prompt = registry.get_system_prompt(&name);
 
@@ -179,7 +169,7 @@ impl ToolHandler for AgentHandler {
         let mut message = String::new();
         let mut item_id = call_id.clone();
         if item_id.is_empty() {
-            let random_id: u64 = rand::rng().random();
+            let random_id: u64 = rand::thread_rng().r#gen();
             item_id = format!("agent-call-{random_id}");
         }
 
