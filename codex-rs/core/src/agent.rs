@@ -163,6 +163,13 @@ impl AgentRegistry {
                 return Ok(Self { agents, agents_dir });
             }
             let config_path = dir.join("agents.toml");
+            if config_path.symlink_metadata().map_or(false, |m| m.is_symlink()) {
+                tracing::error!(
+                    "Security: agents config file at '{}' is a symlink, which is not allowed. Aborting loading of user-defined agents.",
+                    config_path.display()
+                );
+                return Ok(Self { agents, agents_dir });
+            }
             if config_path.exists() {
                 match std::fs::read_to_string(&config_path) {
                     Ok(content) => {
