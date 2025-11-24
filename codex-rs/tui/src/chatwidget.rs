@@ -1484,44 +1484,50 @@ impl ChatWidget {
             SlashCommand::Agents => {
                 self.add_agents_output();
             }
-            #[cfg(debug_assertions)]
             SlashCommand::TestApproval => {
-                use codex_core::protocol::EventMsg;
-                use std::collections::HashMap;
+                if cfg!(debug_assertions) {
+                    use codex_core::protocol::EventMsg;
+                    use std::collections::HashMap;
 
-                use codex_core::protocol::ApplyPatchApprovalRequestEvent;
-                use codex_core::protocol::FileChange;
+                    use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+                    use codex_core::protocol::FileChange;
 
-                self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: "1".to_string(),
-                    // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
-                    //     call_id: "1".to_string(),
-                    //     command: vec!["git".into(), "apply".into()],
-                    //     cwd: self.config.cwd.clone(),
-                    //     reason: Some("test".to_string()),
-                    // }),
-                    msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
-                        call_id: "1".to_string(),
-                        turn_id: "turn-1".to_string(),
-                        changes: HashMap::from([
-                            (
-                                PathBuf::from("/tmp/test.txt"),
-                                FileChange::Add {
-                                    content: "test".to_string(),
-                                },
-                            ),
-                            (
-                                PathBuf::from("/tmp/test2.txt"),
-                                FileChange::Update {
-                                    unified_diff: "+test\n-test2".to_string(),
-                                    move_path: None,
-                                },
-                            ),
-                        ]),
-                        reason: None,
-                        grant_root: Some(PathBuf::from("/tmp")),
-                    }),
-                }));
+                    self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                        id: "1".to_string(),
+                        // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+                        //     call_id: "1".to_string(),
+                        //     command: vec!["git".into(), "apply".into()],
+                        //     cwd: self.config.cwd.clone(),
+                        //     reason: Some("test".to_string()),
+                        // }),
+                        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+                            call_id: "1".to_string(),
+                            turn_id: "turn-1".to_string(),
+                            changes: HashMap::from([
+                                (
+                                    PathBuf::from("/tmp/test.txt"),
+                                    FileChange::Add {
+                                        content: "test".to_string(),
+                                    },
+                                ),
+                                (
+                                    PathBuf::from("/tmp/test2.txt"),
+                                    FileChange::Update {
+                                        unified_diff: "+test\n-test2".to_string(),
+                                        move_path: None,
+                                    },
+                                ),
+                            ]),
+                            reason: None,
+                            grant_root: Some(PathBuf::from("/tmp")),
+                        }),
+                    }));
+                } else {
+                    self.add_info_message(
+                        "'/test-approval' is only available in debug builds.".to_string(),
+                        None,
+                    );
+                }
             }
         }
     }

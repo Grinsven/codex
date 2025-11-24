@@ -82,9 +82,7 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit => true,
             SlashCommand::Rollout => true,
-
-            #[cfg(debug_assertions)]
-            SlashCommand::TestApproval => true,
+            SlashCommand::TestApproval => cfg!(debug_assertions),
         }
     }
 
