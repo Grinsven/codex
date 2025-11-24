@@ -162,7 +162,7 @@ impl ToolHandler for AgentHandler {
         let mut item_id = call_id.clone();
         if item_id.is_empty() {
             let random_id: u64 = rand::rng().random();
-            item_id = format!("agent-call-{}", random_id);
+            item_id = format!("agent-call-{random_id}");
         }
 
         while let Some(event) = stream.next().await {
