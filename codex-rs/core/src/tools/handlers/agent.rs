@@ -139,6 +139,11 @@ impl ToolHandler for AgentHandler {
             .map(|(name, tool)| (name, tool.tool))
             .collect();
 
+use crate::client::ModelClient;
+use crate::model_provider_info::WireApi;
+
+// ... imports ...
+
         let mut sub_tools_config = turn.tools_config.clone();
         sub_tools_config.include_agent_tool = false;
 
@@ -158,9 +163,23 @@ impl ToolHandler for AgentHandler {
             output_schema: None,
         };
 
-        let mut stream = turn
-            .client
-            .clone()
+        // Clone the provider and force WireApi::Chat to ensure compatibility with
+        // endpoints that reject the 'instructions' field in Responses API (e.g. GitHub Models).
+        let mut provider = turn.client.get_provider();
+        provider.wire_api = WireApi::Chat;
+
+        let sub_client = ModelClient::new(
+            turn.client.config(),
+            turn.client.get_auth_manager(),
+            turn.client.get_otel_event_manager(),
+            provider,
+            turn.client.get_reasoning_effort(),
+            turn.client.get_reasoning_summary(),
+            session.conversation_id().clone(),
+            turn.client.get_session_source(),
+        );
+
+        let mut stream = sub_client
             .stream(&prompt)
             .await
             .map_err(|e| FunctionCallError::Fatal(e.to_string()))?;
