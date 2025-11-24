@@ -102,3 +102,13 @@ If you don’t have the tool:
   let request = mock.single_request();
   // assert using request.function_call_output(call_id) or request.json_body() or other helpers.
   ```
+
+# Agent usage rules (ASCII-only)
+
+- If the user asks for "two code reviewers" (or similar), run both @code_reviewer and @code_reviewer_b on the requested scope (latest diff/commits if unspecified), then merge findings ordered by severity with file:line.
+- If the user asks for "two validators" (or similar), run both @validator and @validator_b on the requested scope, then merge findings ordered by severity with file:line.
+- If the user asks for "a logic review", run @logic_reviewer.
+- If the user asks for "a debugger", run @debugger.
+- If the user asks for "research", run @researcher.
+- Default scope when not provided: latest two commits in the current repo.
+- Always cite file:line in findings and keep summaries concise.

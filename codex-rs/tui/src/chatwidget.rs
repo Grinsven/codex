@@ -1481,43 +1481,53 @@ impl ChatWidget {
                     self.add_info_message("Rollout path is not available yet.".to_string(), None);
                 }
             }
+            SlashCommand::Agents => {
+                self.add_agents_output();
+            }
             SlashCommand::TestApproval => {
-                use codex_core::protocol::EventMsg;
-                use std::collections::HashMap;
+                if cfg!(debug_assertions) {
+                    use codex_core::protocol::EventMsg;
+                    use std::collections::HashMap;
 
-                use codex_core::protocol::ApplyPatchApprovalRequestEvent;
-                use codex_core::protocol::FileChange;
+                    use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+                    use codex_core::protocol::FileChange;
 
-                self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: "1".to_string(),
-                    // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
-                    //     call_id: "1".to_string(),
-                    //     command: vec!["git".into(), "apply".into()],
-                    //     cwd: self.config.cwd.clone(),
-                    //     reason: Some("test".to_string()),
-                    // }),
-                    msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
-                        call_id: "1".to_string(),
-                        turn_id: "turn-1".to_string(),
-                        changes: HashMap::from([
-                            (
-                                PathBuf::from("/tmp/test.txt"),
-                                FileChange::Add {
-                                    content: "test".to_string(),
-                                },
-                            ),
-                            (
-                                PathBuf::from("/tmp/test2.txt"),
-                                FileChange::Update {
-                                    unified_diff: "+test\n-test2".to_string(),
-                                    move_path: None,
-                                },
-                            ),
-                        ]),
-                        reason: None,
-                        grant_root: Some(PathBuf::from("/tmp")),
-                    }),
-                }));
+                    self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                        id: "1".to_string(),
+                        // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+                        //     call_id: "1".to_string(),
+                        //     command: vec!["git".into(), "apply".into()],
+                        //     cwd: self.config.cwd.clone(),
+                        //     reason: Some("test".to_string()),
+                        // }),
+                        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+                            call_id: "1".to_string(),
+                            turn_id: "turn-1".to_string(),
+                            changes: HashMap::from([
+                                (
+                                    PathBuf::from("/tmp/test.txt"),
+                                    FileChange::Add {
+                                        content: "test".to_string(),
+                                    },
+                                ),
+                                (
+                                    PathBuf::from("/tmp/test2.txt"),
+                                    FileChange::Update {
+                                        unified_diff: "+test\n-test2".to_string(),
+                                        move_path: None,
+                                    },
+                                ),
+                            ]),
+                            reason: None,
+                            grant_root: Some(PathBuf::from("/tmp")),
+                        }),
+                    }));
+                } else {
+                    self.add_info_message(
+                        "'/test-approval' is only available in debug builds.".to_string(),
+                        None,
+                    );
+                }
             }
         }
     }
@@ -1574,7 +1584,10 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
-        let UserMessage { text, image_paths } = user_message;
+        let UserMessage {
+            mut text,
+            image_paths,
+        } = user_message;
         if text.is_empty() && image_paths.is_empty() {
             return;
         }
@@ -1597,6 +1610,25 @@ impl ChatWidget {
                 command: cmd.to_string(),
             });
             return;
+        }
+
+        // Parse and convert @agent mentions into explicit agent tool calls so the
+        // core can run the requested sub-agent. Show a small history marker for
+        // visibility before queuing the transformed message.
+        if !text.is_empty() && text.contains('@') {
+            use crate::agent_mention::parse_agent_mentions;
+            use crate::agent_mention::replace_mentions_with_calls;
+
+            let mentions = parse_agent_mentions(&text);
+            if !mentions.is_empty() {
+                for mention in &mentions {
+                    self.add_to_history(history_cell::new_agent_invocation(
+                        &mention.agent_name,
+                        &mention.task,
+                    ));
+                }
+                text = replace_mentions_with_calls(&text);
+            }
         }
 
         if !text.is_empty() {
@@ -1727,6 +1759,18 @@ impl ChatWidget {
             EventMsg::GetHistoryEntryResponse(ev) => self.on_get_history_entry_response(ev),
             EventMsg::McpListToolsResponse(ev) => self.on_list_mcp_tools(ev),
             EventMsg::ListCustomPromptsResponse(ev) => self.on_list_custom_prompts(ev),
+            EventMsg::ListAgentsResponse(ev) => {
+                self.add_to_history(history_cell::new_agents_list(ev.agents));
+            }
+            EventMsg::AgentBegin(ev) => {
+                self.add_to_history(history_cell::new_agent_begin(&ev));
+            }
+            EventMsg::AgentProgress(ev) => {
+                self.add_to_history(history_cell::new_agent_progress(&ev));
+            }
+            EventMsg::AgentEnd(ev) => {
+                self.add_to_history(history_cell::new_agent_end(&ev));
+            }
             EventMsg::ShutdownComplete => self.on_shutdown_complete(),
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => self.on_turn_diff(unified_diff),
             EventMsg::DeprecationNotice(ev) => self.on_deprecation_notice(ev),
@@ -2717,6 +2761,10 @@ impl ChatWidget {
         } else {
             self.submit_op(Op::ListMcpTools);
         }
+    }
+
+    pub(crate) fn add_agents_output(&mut self) {
+        self.submit_op(Op::ListAgents);
     }
 
     /// Forward file-search results to the bottom pane.
