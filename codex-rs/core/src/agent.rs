@@ -190,27 +190,21 @@ impl AgentRegistry {
                                     // If prompt_file is specified, load the prompt from file
                                     if let Some(ref prompt_file) = config.prompt_file {
                                         // Validate the path to prevent traversal attacks
-                                        match Self::validate_prompt_path(dir, prompt_file) {
-                                            Ok(safe_path) => {
-                                                match std::fs::read_to_string(&safe_path) {
-                                                    Ok(prompt_content) => {
-                                                        config.prompt = Some(prompt_content);
-                                                        tracing::debug!(
-                                                            "Loaded prompt file for agent '{}'",
-                                                            name
-                                                        );
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!(
-                                                            "Cannot read prompt file '{}' for agent '{}': {}",
-                                                            prompt_file,
-                                                            name,
-                                                            e
-                                                        );
-                                                        // Skip this agent but continue loading others
-                                                        continue;
-                                                    }
-                                                }
+                                        match Self::validate_prompt_path(dir, prompt_file).and_then(|path| {
+                                            std::fs::read_to_string(&path).map_err(|e| {
+                                                anyhow::anyhow!(
+                                                    "Cannot read prompt file '{}': {}",
+                                                    path.display(),
+                                                    e
+                                                )
+                                            })
+                                        }) {
+                                            Ok(prompt_content) => {
+                                                config.prompt = Some(prompt_content);
+                                                tracing::debug!(
+                                                    "Loaded prompt file for agent '{}'",
+                                                    name
+                                                );
                                             }
                                             Err(e) => {
                                                 tracing::error!(
@@ -289,8 +283,7 @@ impl AgentRegistry {
         agents.sort_by(|a, b| {
             // Built-in agents first, then alphabetical
             match (a.is_builtin, b.is_builtin) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
+                (true, false) => std::cmp::Ordering::Less,\n                (false, true) => std::cmp::Ordering::Greater,
                 _ => a.name.cmp(&b.name),
             }
         });
