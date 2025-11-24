@@ -138,13 +138,31 @@ impl ToolHandler for AgentHandler {
             task_text = format!("{task_text}\n\nContext:\n{ctx}");
         }
 
+        let mcp_tools = session
+            .services
+            .mcp_connection_manager
+            .read()
+            .await
+            .list_all_tools()
+            .await
+            .into_iter()
+            .map(|(name, tool)| (name, tool.tool))
+            .collect();
+
+        let mut sub_tools_config = turn.tools_config.clone();
+        sub_tools_config.include_agent_tool = false;
+
+        let (agent_tools, _) =
+            crate::tools::spec::build_specs(&sub_tools_config, Some(mcp_tools)).build();
+        let agent_tools = agent_tools.iter().map(|t| t.spec.clone()).collect();
+
         let prompt = Prompt {
             input: vec![ResponseItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText { text: task_text }],
             }],
-            tools: Vec::new(),
+            tools: agent_tools,
             parallel_tool_calls: false,
             base_instructions_override: Some(instructions),
             output_schema: None,
