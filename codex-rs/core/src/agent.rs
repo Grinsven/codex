@@ -57,14 +57,14 @@ impl AgentConfig {
         }
 
         if let Some(prompt_file) = &self.prompt_file {
-            let full_path = if let Some(dir) = agents_dir {
-                dir.join(prompt_file)
-            } else {
-                PathBuf::from(prompt_file)
-            };
+            let base = agents_dir.ok_or_else(|| {
+                anyhow::anyhow!("Agents directory required to load prompt file '{}'", prompt_file)
+            })?;
 
-            let prompt_content = std::fs::read_to_string(&full_path).map_err(|e| {
-                anyhow::anyhow!("Cannot read prompt file '{}': {}", full_path.display(), e)
+            let safe_path = AgentRegistry::validate_prompt_path(base, prompt_file)?;
+
+            let prompt_content = std::fs::read_to_string(&safe_path).map_err(|e| {
+                anyhow::anyhow!("Cannot read prompt file '{}': {}", safe_path.display(), e)
             })?;
 
             // Cache the loaded prompt
@@ -85,7 +85,7 @@ pub struct AgentRegistry {
 
 impl AgentRegistry {
     /// Validate that a prompt file path doesn't escape allowed directories
-    fn validate_prompt_path(base_dir: &Path, prompt_file: &str) -> anyhow::Result<PathBuf> {
+    pub fn validate_prompt_path(base_dir: &Path, prompt_file: &str) -> anyhow::Result<PathBuf> {
         let path = if prompt_file.starts_with('/') {
             PathBuf::from(prompt_file)
         } else {
