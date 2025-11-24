@@ -4,7 +4,7 @@ use regex_lite::Regex;
 // Compile regex once at startup
 #[allow(clippy::expect_used)]
 static AGENT_MENTION_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"@(\w+):?\s+([^\n@]+)")
+    Regex::new(r"@([\w-]+):?\s+([^\n@]+)")
         .expect("Failed to compile agent mention regex - this is a bug")
 });
 

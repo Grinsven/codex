@@ -151,6 +151,13 @@ impl AgentRegistry {
         // Try to load user agents from ~/.codex/agents.toml
         let agents_dir = Self::get_agents_directory();
         if let Some(ref dir) = agents_dir {
+            if dir.symlink_metadata().map_or(false, |m| m.is_symlink()) {
+                tracing::error!(
+                    "Security: agents directory at '{}' is a symlink, which is not allowed. Aborting loading of user-defined agents.",
+                    dir.display()
+                );
+                return Ok(Self { agents, agents_dir });
+            }
             let config_path = dir.join("agents.toml");
             if config_path.exists() {
                 match std::fs::read_to_string(&config_path) {
