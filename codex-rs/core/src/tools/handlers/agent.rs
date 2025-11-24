@@ -148,7 +148,7 @@ impl ToolHandler for AgentHandler {
 
         let mut prompt_input = vec![ResponseItem::Message {
             id: None,
-            role: "system".to_string(),
+            role: "user".to_string(),
             content: vec![ContentItem::InputText { text: instructions }],
         }];
         prompt_input.push(ResponseItem::Message {
@@ -161,9 +161,10 @@ impl ToolHandler for AgentHandler {
             input: prompt_input,
             tools: agent_tools,
             parallel_tool_calls: false,
-            // Set empty instructions to avoid "Instructions are not valid" error on strict endpoints
-            // while still satisfying the Responses API requirement for the field to exist.
-            base_instructions_override: Some(String::new()),
+            // Do not override base instructions. Some endpoints (e.g. GitHub Models / ChatGPT)
+            // validate the 'instructions' field strictly and reject custom system prompts.
+            // We inject the agent persona as a user message instead.
+            base_instructions_override: None,
             output_schema: None,
         };
 
