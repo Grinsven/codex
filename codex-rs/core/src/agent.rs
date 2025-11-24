@@ -227,10 +227,7 @@ impl AgentRegistry {
 
     /// Get the agents directory path (~/.codex/agents)
     fn get_agents_directory() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .ok()
-            .map(|home| PathBuf::from(home).join(".codex"))
+        dirs::home_dir().map(|home| home.join(".codex"))
     }
 
     /// Get an agent configuration by name

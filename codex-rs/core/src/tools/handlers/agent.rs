@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use rand::Rng;
 use serde::Deserialize;
 use tracing::warn;
 
@@ -160,7 +161,8 @@ impl ToolHandler for AgentHandler {
         let mut message = String::new();
         let mut item_id = call_id.clone();
         if item_id.is_empty() {
-            item_id = "agent-call".to_string();
+            let random_id: u64 = rand::rng().random();
+            item_id = format!("agent-call-{}", random_id);
         }
 
         while let Some(event) = stream.next().await {
