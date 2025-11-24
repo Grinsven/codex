@@ -115,12 +115,8 @@ impl ToolHandler for AgentHandler {
             .send_event(turn.as_ref(), EventMsg::AgentBegin(begin_event))
             .await;
 
-        let base_instructions = turn
-            .base_instructions
-            .clone()
-            .unwrap_or_else(|| turn.client.get_model_family().base_instructions);
         let instructions = format!(
-            "{base_instructions}\n\nYou are the \"{name}\" agent.\n{agent_prompt}\n\nDo not delegate to other agents. Provide the result directly.",
+            "You are the \"{name}\" agent.\n{agent_prompt}\n\nDo not delegate to other agents. Provide the result directly.",
         );
 
         let mut task_text = task.clone();
