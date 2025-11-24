@@ -139,11 +139,6 @@ impl ToolHandler for AgentHandler {
             .map(|(name, tool)| (name, tool.tool))
             .collect();
 
-use crate::client::ModelClient;
-use crate::model_provider_info::WireApi;
-
-// ... imports ...
-
         let mut sub_tools_config = turn.tools_config.clone();
         sub_tools_config.include_agent_tool = false;
 
@@ -151,35 +146,30 @@ use crate::model_provider_info::WireApi;
             crate::tools::spec::build_specs(&sub_tools_config, Some(mcp_tools)).build();
         let agent_tools = agent_tools.iter().map(|t| t.spec.clone()).collect();
 
+        let mut prompt_input = vec![ResponseItem::Message {
+            id: None,
+            role: "system".to_string(),
+            content: vec![ContentItem::InputText { text: instructions }],
+        }];
+        prompt_input.push(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text: task_text }],
+        });
+
         let prompt = Prompt {
-            input: vec![ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: task_text }],
-            }],
+            input: prompt_input,
             tools: agent_tools,
             parallel_tool_calls: false,
-            base_instructions_override: Some(instructions),
+            // Set empty instructions to avoid "Instructions are not valid" error on strict endpoints
+            // while still satisfying the Responses API requirement for the field to exist.
+            base_instructions_override: Some(String::new()),
             output_schema: None,
         };
 
-        // Clone the provider and force WireApi::Chat to ensure compatibility with
-        // endpoints that reject the 'instructions' field in Responses API (e.g. GitHub Models).
-        let mut provider = turn.client.get_provider();
-        provider.wire_api = WireApi::Chat;
-
-        let sub_client = ModelClient::new(
-            turn.client.config(),
-            turn.client.get_auth_manager(),
-            turn.client.get_otel_event_manager(),
-            provider,
-            turn.client.get_reasoning_effort(),
-            turn.client.get_reasoning_summary(),
-            session.conversation_id().clone(),
-            turn.client.get_session_source(),
-        );
-
-        let mut stream = sub_client
+        let mut stream = turn
+            .client
+            .clone()
             .stream(&prompt)
             .await
             .map_err(|e| FunctionCallError::Fatal(e.to_string()))?;
