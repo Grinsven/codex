@@ -139,6 +139,11 @@ impl AgentRegistry {
 
     /// Create a new agent registry, loading user configurations if available
     pub fn new() -> Result<Self> {
+        Self::from_paths(Self::get_agents_directory())
+    }
+
+    /// Create a registry from a specific configuration directory (exposed for testing)
+    pub fn from_paths(agents_dir: Option<PathBuf>) -> Result<Self> {
         let mut agents = HashMap::new();
 
         // Add the single default "general" agent
@@ -152,8 +157,7 @@ impl AgentRegistry {
             }
         );
 
-        // Try to load user agents from ~/.codex/agents.toml
-        let agents_dir = Self::get_agents_directory();
+        // Try to load user agents from the provided directory
         if let Some(ref dir) = agents_dir {
             if dir.symlink_metadata().map_or(false, |m| m.is_symlink()) {
                 tracing::error!(
@@ -283,7 +287,8 @@ impl AgentRegistry {
         agents.sort_by(|a, b| {
             // Built-in agents first, then alphabetical
             match (a.is_builtin, b.is_builtin) {
-                (true, false) => std::cmp::Ordering::Less,\n                (false, true) => std::cmp::Ordering::Greater,
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
                 _ => a.name.cmp(&b.name),
             }
         });

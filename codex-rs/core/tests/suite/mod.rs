@@ -18,6 +18,8 @@ mod abort_tasks;
 #[cfg(not(target_os = "windows"))]
 mod agent_tool;
 #[cfg(not(target_os = "windows"))]
+mod agent_security;
+#[cfg(not(target_os = "windows"))]
 mod apply_patch_cli;
 #[cfg(not(target_os = "windows"))]
 mod approvals;
