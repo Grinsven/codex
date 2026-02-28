@@ -24,6 +24,13 @@
       },
       "type": "object"
     },
+    "AgentWorktreeCleanup": {
+      "enum": [
+        "auto_remove_worktree",
+        "keep_worktree"
+      ],
+      "type": "string"
+    },
     "AgentsToml": {
       "additionalProperties": {
         "$ref": "#/definitions/AgentRoleToml"
@@ -46,6 +53,44 @@
           "format": "uint",
           "minimum": 1.0,
           "type": "integer"
+        },
+        "worktree": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentsWorktreeToml"
+            }
+          ],
+          "description": "Default worktree isolation settings for spawned agents."
+        }
+      },
+      "type": "object"
+    },
+    "AgentsWorktreeToml": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentWorktreeCleanup"
+            }
+          ],
+          "description": "Cleanup behavior applied when agent threads complete."
+        },
+        "default_base_ref": {
+          "description": "Optional default git base ref for new worktrees.",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Enable isolated git worktrees by default for spawned agents.",
+          "type": "boolean"
+        },
+        "root_dir": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            }
+          ],
+          "description": "Root directory where spawned worktrees are created."
         }
       },
       "type": "object"

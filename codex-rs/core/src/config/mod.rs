@@ -356,6 +356,14 @@ pub struct Config {
 
     /// User-defined role declarations keyed by role name.
     pub agent_roles: BTreeMap<String, AgentRoleConfig>,
+    /// Whether spawned agents should default to isolated git worktrees.
+    pub agent_worktree_enabled: bool,
+    /// Root directory where agent worktrees are created.
+    pub agent_worktree_root_dir: PathBuf,
+    /// Default cleanup behavior for agent worktrees.
+    pub agent_worktree_cleanup: AgentWorktreeCleanup,
+    /// Optional default git base ref for newly provisioned worktrees.
+    pub agent_worktree_default_base_ref: Option<String>,
 
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
@@ -1355,6 +1363,8 @@ pub struct AgentsToml {
     /// Default maximum runtime in seconds for agent job workers.
     #[schemars(range(min = 1))]
     pub job_max_runtime_seconds: Option<u64>,
+    /// Default worktree isolation settings for spawned agents.
+    pub worktree: Option<AgentsWorktreeToml>,
 
     /// User-defined role declarations keyed by role name.
     ///
@@ -1366,6 +1376,27 @@ pub struct AgentsToml {
     /// ```
     #[serde(default, flatten)]
     pub roles: BTreeMap<String, AgentRoleToml>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWorktreeCleanup {
+    #[default]
+    AutoRemoveWorktree,
+    KeepWorktree,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AgentsWorktreeToml {
+    /// Enable isolated git worktrees by default for spawned agents.
+    pub enabled: Option<bool>,
+    /// Root directory where spawned worktrees are created.
+    pub root_dir: Option<AbsolutePathBuf>,
+    /// Cleanup behavior applied when agent threads complete.
+    pub cleanup: Option<AgentWorktreeCleanup>,
+    /// Optional default git base ref for new worktrees.
+    pub default_base_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1889,6 +1920,34 @@ impl Config {
                 "agents.job_max_runtime_seconds must fit within a 64-bit signed integer",
             ));
         }
+        let agent_worktree_enabled = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.worktree.as_ref())
+            .and_then(|worktree| worktree.enabled)
+            .unwrap_or(false);
+        let agent_worktree_root_dir = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.worktree.as_ref())
+            .and_then(|worktree| worktree.root_dir.as_ref())
+            .map(AbsolutePathBuf::to_path_buf)
+            .unwrap_or_else(|| {
+                codex_home.join(crate::agent::worktree::DEFAULT_WORKTREE_ROOT_DIR_NAME)
+            });
+        let agent_worktree_cleanup = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.worktree.as_ref())
+            .and_then(|worktree| worktree.cleanup)
+            .unwrap_or_default();
+        let agent_worktree_default_base_ref = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.worktree.as_ref())
+            .and_then(|worktree| worktree.default_base_ref.as_ref())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let background_terminal_max_timeout = cfg
             .background_terminal_max_timeout
             .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
@@ -2134,6 +2193,10 @@ impl Config {
             agent_max_threads,
             agent_max_depth,
             agent_roles,
+            agent_worktree_enabled,
+            agent_worktree_root_dir,
+            agent_worktree_cleanup,
+            agent_worktree_default_base_ref,
             memories: cfg.memories.unwrap_or_default().into(),
             agent_job_max_runtime_seconds,
             codex_home,
@@ -4617,6 +4680,7 @@ model = "gpt-5.1-codex"
                 max_threads: None,
                 max_depth: None,
                 job_max_runtime_seconds: None,
+                worktree: None,
                 roles: BTreeMap::from([(
                     "researcher".to_string(),
                     AgentRoleToml {
@@ -4889,6 +4953,12 @@ model_verbosity = "high"
                 agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
                 agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
                 agent_roles: BTreeMap::new(),
+                agent_worktree_enabled: false,
+                agent_worktree_root_dir: fixture
+                    .codex_home()
+                    .join(crate::agent::worktree::DEFAULT_WORKTREE_ROOT_DIR_NAME),
+                agent_worktree_cleanup: AgentWorktreeCleanup::AutoRemoveWorktree,
+                agent_worktree_default_base_ref: None,
                 memories: MemoriesConfig::default(),
                 agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
                 codex_home: fixture.codex_home(),
@@ -5017,6 +5087,12 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            agent_worktree_enabled: false,
+            agent_worktree_root_dir: fixture
+                .codex_home()
+                .join(crate::agent::worktree::DEFAULT_WORKTREE_ROOT_DIR_NAME),
+            agent_worktree_cleanup: AgentWorktreeCleanup::AutoRemoveWorktree,
+            agent_worktree_default_base_ref: None,
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
@@ -5143,6 +5219,12 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            agent_worktree_enabled: false,
+            agent_worktree_root_dir: fixture
+                .codex_home()
+                .join(crate::agent::worktree::DEFAULT_WORKTREE_ROOT_DIR_NAME),
+            agent_worktree_cleanup: AgentWorktreeCleanup::AutoRemoveWorktree,
+            agent_worktree_default_base_ref: None,
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
@@ -5255,6 +5337,12 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            agent_worktree_enabled: false,
+            agent_worktree_root_dir: fixture
+                .codex_home()
+                .join(crate::agent::worktree::DEFAULT_WORKTREE_ROOT_DIR_NAME),
+            agent_worktree_cleanup: AgentWorktreeCleanup::AutoRemoveWorktree,
+            agent_worktree_default_base_ref: None,
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),

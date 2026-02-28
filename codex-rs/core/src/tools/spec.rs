@@ -614,7 +614,7 @@ fn create_collab_input_items_schema() -> JsonSchema {
 }
 
 fn create_spawn_agent_tool(config: &ToolsConfig) -> ToolSpec {
-    let properties = BTreeMap::from([
+    let mut properties = BTreeMap::from([
         (
             "message".to_string(),
             JsonSchema::String {
@@ -643,6 +643,51 @@ fn create_spawn_agent_tool(config: &ToolsConfig) -> ToolSpec {
             },
         ),
     ]);
+    properties.insert(
+        "worktree".to_string(),
+        JsonSchema::Object {
+            properties: BTreeMap::from([
+                (
+                    "enabled".to_string(),
+                    JsonSchema::Boolean {
+                        description: Some(
+                            "Override whether this spawned agent should run from an isolated git worktree."
+                                .to_string(),
+                        ),
+                    },
+                ),
+                (
+                    "base_ref".to_string(),
+                    JsonSchema::String {
+                        description: Some(
+                            "Optional git base ref used when creating the worktree branch (defaults to HEAD)."
+                                .to_string(),
+                        ),
+                    },
+                ),
+                (
+                    "branch_name".to_string(),
+                    JsonSchema::String {
+                        description: Some(
+                            "Optional explicit branch name for the spawned agent worktree."
+                                .to_string(),
+                        ),
+                    },
+                ),
+                (
+                    "cleanup".to_string(),
+                    JsonSchema::String {
+                        description: Some(
+                            "Optional cleanup mode: auto_remove_worktree (default) or keep_worktree."
+                                .to_string(),
+                        ),
+                    },
+                ),
+            ]),
+            required: None,
+            additional_properties: Some(false.into()),
+        },
+    );
 
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),

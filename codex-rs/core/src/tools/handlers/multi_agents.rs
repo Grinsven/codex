@@ -2,6 +2,7 @@ use crate::agent::AgentStatus;
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::codex::Session;
 use crate::codex::TurnContext;
+use crate::config::AgentWorktreeCleanup;
 use crate::config::Config;
 use crate::error::CodexErr;
 use crate::features::Feature;
@@ -94,6 +95,8 @@ mod spawn {
     use crate::agent::control::SpawnAgentOptions;
     use crate::agent::role::DEFAULT_ROLE_NAME;
     use crate::agent::role::apply_role_to_config;
+    use crate::agent::worktree::AgentWorktreeInfo;
+    use crate::agent::worktree::ProvisionAgentWorktreeRequest;
 
     use crate::agent::exceeds_thread_spawn_depth_limit;
     use crate::agent::next_thread_spawn_depth;
@@ -106,12 +109,22 @@ mod spawn {
         agent_type: Option<String>,
         #[serde(default)]
         fork_context: bool,
+        worktree: Option<SpawnWorktreeArgs>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SpawnWorktreeArgs {
+        enabled: Option<bool>,
+        base_ref: Option<String>,
+        branch_name: Option<String>,
+        cleanup: Option<AgentWorktreeCleanup>,
     }
 
     #[derive(Debug, Serialize)]
     struct SpawnAgentResult {
         agent_id: String,
         nickname: Option<String>,
+        worktree: Option<AgentWorktreeInfo>,
     }
 
     pub async fn handle(
@@ -154,6 +167,41 @@ mod spawn {
             .map_err(FunctionCallError::RespondToModel)?;
         apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
         apply_spawn_agent_overrides(&mut config, child_depth);
+        let worktree_enabled = args
+            .worktree
+            .as_ref()
+            .and_then(|worktree| worktree.enabled)
+            .unwrap_or(turn.config.agent_worktree_enabled);
+        let mut worktree = if worktree_enabled {
+            let requested_cleanup = args
+                .worktree
+                .as_ref()
+                .and_then(|worktree| worktree.cleanup)
+                .unwrap_or(turn.config.agent_worktree_cleanup);
+            let request = ProvisionAgentWorktreeRequest {
+                cwd: turn.cwd.clone(),
+                worktree_root_dir: turn.config.agent_worktree_root_dir.clone(),
+                owner_thread_id: session.conversation_id,
+                call_id: call_id.clone(),
+                base_ref: args
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.base_ref.clone())
+                    .or_else(|| turn.config.agent_worktree_default_base_ref.clone()),
+                branch_name: args
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.branch_name.clone()),
+                cleanup: requested_cleanup,
+            };
+            let provisioned = crate::agent::worktree::provision_agent_worktree(request)
+                .await
+                .map_err(FunctionCallError::RespondToModel)?;
+            config.cwd = provisioned.worktree_path.clone();
+            Some(provisioned)
+        } else {
+            None
+        };
 
         let result = session
             .services
@@ -179,6 +227,22 @@ mod spawn {
             ),
             Err(_) => (None, AgentStatus::NotFound),
         };
+        if let Some(spawned_thread_id) = new_thread_id
+            && let Some(worktree) = worktree.clone()
+        {
+            session
+                .services
+                .agent_control
+                .register_agent_worktree(spawned_thread_id, worktree)
+                .await;
+        }
+        if new_thread_id.is_none()
+            && let Some(mut worktree) = worktree.take()
+            && let Err(err) =
+                crate::agent::worktree::finalize_agent_worktree(&mut worktree, true).await
+        {
+            tracing::warn!("failed to clean up spawn worktree after spawn error: {err}");
+        }
         let (new_agent_nickname, new_agent_role) = match new_thread_id {
             Some(thread_id) => session
                 .services
@@ -212,6 +276,7 @@ mod spawn {
         let content = serde_json::to_string(&SpawnAgentResult {
             agent_id: new_thread_id.to_string(),
             nickname,
+            worktree,
         })
         .map_err(|err| {
             FunctionCallError::Fatal(format!("failed to serialize spawn_agent result: {err}"))
@@ -479,6 +544,8 @@ pub(crate) mod wait {
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub(crate) struct WaitResult {
         pub(crate) status: HashMap<ThreadId, AgentStatus>,
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        pub(crate) worktrees: HashMap<ThreadId, crate::agent::worktree::AgentWorktreeInfo>,
         pub(crate) timed_out: bool,
     }
 
@@ -616,6 +683,11 @@ pub(crate) mod wait {
         let agent_statuses = build_wait_agent_statuses(&statuses_map, &receiver_agents);
         let result = WaitResult {
             status: statuses_map.clone(),
+            worktrees: session
+                .services
+                .agent_control
+                .get_agent_worktrees(&receiver_thread_ids)
+                .await,
             timed_out: statuses.is_empty(),
         };
 
@@ -673,6 +745,8 @@ pub mod close_agent {
     #[derive(Debug, Deserialize, Serialize)]
     pub(super) struct CloseAgentResult {
         pub(super) status: AgentStatus,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub(super) worktree: Option<crate::agent::worktree::AgentWorktreeInfo>,
     }
 
     pub async fn handle(
@@ -752,10 +826,16 @@ pub mod close_agent {
             )
             .await;
         result?;
+        let worktree = session
+            .services
+            .agent_control
+            .get_agent_worktree(agent_id)
+            .await;
 
-        let content = serde_json::to_string(&CloseAgentResult { status }).map_err(|err| {
-            FunctionCallError::Fatal(format!("failed to serialize close_agent result: {err}"))
-        })?;
+        let content =
+            serde_json::to_string(&CloseAgentResult { status, worktree }).map_err(|err| {
+                FunctionCallError::Fatal(format!("failed to serialize close_agent result: {err}"))
+            })?;
 
         Ok(ToolOutput::Function {
             body: FunctionCallOutputBody::Text(content),
@@ -1818,6 +1898,7 @@ mod tests {
                     (id_a, AgentStatus::NotFound),
                     (id_b, AgentStatus::NotFound),
                 ]),
+                worktrees: HashMap::new(),
                 timed_out: false
             }
         );
@@ -1859,6 +1940,7 @@ mod tests {
             result,
             wait::WaitResult {
                 status: HashMap::new(),
+                worktrees: HashMap::new(),
                 timed_out: true
             }
         );
@@ -1956,6 +2038,7 @@ mod tests {
             result,
             wait::WaitResult {
                 status: HashMap::from([(agent_id, AgentStatus::Shutdown)]),
+                worktrees: HashMap::new(),
                 timed_out: false
             }
         );

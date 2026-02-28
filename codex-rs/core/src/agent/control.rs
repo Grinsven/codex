@@ -1,6 +1,7 @@
 use crate::agent::AgentStatus;
 use crate::agent::guards::Guards;
 use crate::agent::status::is_final;
+use crate::agent::worktree::AgentWorktreeInfo;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 use crate::find_thread_path_by_id_str;
@@ -19,8 +20,10 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Weak;
+use tokio::sync::Mutex;
 use tokio::sync::watch;
 
 const AGENT_NAMES: &str = include_str!("agent_names.txt");
@@ -52,6 +55,7 @@ pub(crate) struct AgentControl {
     /// `ThreadManagerState -> CodexThread -> Session -> SessionServices -> ThreadManagerState`.
     manager: Weak<ThreadManagerState>,
     state: Arc<Guards>,
+    worktrees: Arc<Mutex<HashMap<ThreadId, AgentWorktreeInfo>>>,
 }
 
 impl AgentControl {
@@ -276,6 +280,7 @@ impl AgentControl {
         if matches!(result, Err(CodexErr::InternalAgentDied)) {
             let _ = state.remove_thread(&agent_id).await;
             self.state.release_spawned_thread(agent_id);
+            let _ = self.finalize_agent_worktree(agent_id, true).await;
         }
         result
     }
@@ -292,6 +297,7 @@ impl AgentControl {
         let result = state.send_op(agent_id, Op::Shutdown {}).await;
         let _ = state.remove_thread(&agent_id).await;
         self.state.release_spawned_thread(agent_id);
+        let _ = self.finalize_agent_worktree(agent_id, false).await;
         result
     }
 
@@ -322,6 +328,36 @@ impl AgentControl {
             session_source.get_nickname(),
             session_source.get_agent_role(),
         ))
+    }
+
+    pub(crate) async fn register_agent_worktree(
+        &self,
+        agent_id: ThreadId,
+        worktree: AgentWorktreeInfo,
+    ) {
+        let mut worktrees = self.worktrees.lock().await;
+        worktrees.insert(agent_id, worktree);
+    }
+
+    pub(crate) async fn get_agent_worktree(&self, agent_id: ThreadId) -> Option<AgentWorktreeInfo> {
+        let worktrees = self.worktrees.lock().await;
+        worktrees.get(&agent_id).cloned()
+    }
+
+    pub(crate) async fn get_agent_worktrees(
+        &self,
+        agent_ids: &[ThreadId],
+    ) -> HashMap<ThreadId, AgentWorktreeInfo> {
+        let worktrees = self.worktrees.lock().await;
+        agent_ids
+            .iter()
+            .filter_map(|agent_id| {
+                worktrees
+                    .get(agent_id)
+                    .cloned()
+                    .map(|worktree| (*agent_id, worktree))
+            })
+            .collect()
     }
 
     /// Subscribe to status updates for `agent_id`, yielding the latest value and changes.
@@ -410,6 +446,9 @@ impl AgentControl {
             if !is_final(&status) {
                 return;
             }
+            let worktree = control
+                .finalize_agent_worktree(child_thread_id, false)
+                .await;
 
             let Ok(state) = control.upgrade() else {
                 return;
@@ -421,9 +460,29 @@ impl AgentControl {
                 .inject_user_message_without_turn(format_subagent_notification_message(
                     &child_thread_id.to_string(),
                     &status,
+                    worktree.as_ref(),
                 ))
                 .await;
         });
+    }
+
+    pub(crate) async fn finalize_agent_worktree(
+        &self,
+        agent_id: ThreadId,
+        force_remove: bool,
+    ) -> Option<AgentWorktreeInfo> {
+        let mut worktree = {
+            let worktrees = self.worktrees.lock().await;
+            worktrees.get(&agent_id).cloned()
+        }?;
+        let cleanup_result =
+            crate::agent::worktree::finalize_agent_worktree(&mut worktree, force_remove).await;
+        if let Err(err) = cleanup_result {
+            tracing::warn!("failed to finalize agent worktree for {agent_id}: {err}");
+        }
+        let mut worktrees = self.worktrees.lock().await;
+        worktrees.insert(agent_id, worktree.clone());
+        Some(worktree)
     }
 
     fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
