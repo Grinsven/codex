@@ -589,6 +589,27 @@ pub(crate) enum AppEvent {
         enabled: bool,
     },
 
+    /// Open the action menu for a global MCP server.
+    OpenMcpServerActions {
+        name: String,
+    },
+
+    /// Show transcript output for a single MCP server.
+    ViewMcpServerTools {
+        name: String,
+    },
+
+    /// Enable or disable a global MCP server.
+    SetMcpServerEnabled {
+        name: String,
+        enabled: bool,
+    },
+
+    /// Reconnect configured MCP servers immediately.
+    ReconnectMcpServer {
+        name: String,
+    },
+
     /// Notify that the manage skills popup was closed.
     ManageSkillsClosed,
 

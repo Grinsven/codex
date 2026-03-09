@@ -1,0 +1,16 @@
+---
+source: tui/src/chatwidget/tests.rs
+expression: popup
+---
+  docs
+  Enabled
+  Transport: docs-server --port 4000
+  Config: [codex-home]/config.toml
+  Auth: Unsupported
+  Tools: 0 · Resources: 0 · Resource templates: 0
+
+› 1. View tools  Show this server's tools and resources in the transcript.
+  2. Reconnect   Reconnect configured MCP servers immediately.
+  3. Disable     Disable this MCP server.
+
+  Press enter to confirm or esc to go back

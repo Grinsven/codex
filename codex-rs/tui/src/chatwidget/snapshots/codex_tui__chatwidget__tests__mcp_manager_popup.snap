@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests.rs
+expression: popup
+---
+  MCP Servers
+  Manage globally configured MCP servers from /mcp.
+
+  Type to search MCP servers
+› docs  Press Enter to manage this MCP server.
+
+  Press enter to confirm or esc to go back
