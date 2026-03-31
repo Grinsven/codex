@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::ChatWidget;
 use crate::app_event::AppEvent;
@@ -9,11 +10,12 @@ use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::history_cell;
 use crate::render::renderable::ColumnRenderable;
 use codex_app_server_protocol::ConfigLayerSource;
+use codex_app_server_protocol::McpAuthStatus as AppServerMcpAuthStatus;
+use codex_app_server_protocol::McpServerStatus;
+use codex_app_server_protocol::McpServerStatusDetail;
 use codex_core::config::types::McpServerConfig;
 use codex_core::config::types::McpServerTransportConfig;
 use codex_protocol::protocol::McpAuthStatus;
-use codex_protocol::protocol::McpListToolsResponseEvent;
-use codex_protocol::protocol::Op;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
@@ -21,16 +23,37 @@ const MCP_MANAGER_SELECTION_VIEW_ID: &str = "mcp-manager-selection";
 const MCP_SERVER_ACTIONS_VIEW_ID: &str = "mcp-server-actions";
 
 impl ChatWidget {
-    pub(crate) fn add_mcp_output(&mut self) {
+    pub(crate) fn add_mcp_output(&mut self, detail: McpServerStatusDetail) {
+        if matches!(detail, McpServerStatusDetail::Full) {
+            self.add_mcp_inventory_output(detail);
+            return;
+        }
+
         if self.global_mcp_servers().is_empty() {
             self.add_to_history(history_cell::empty_mcp_output());
             return;
         }
 
         self.active_mcp_action_server = None;
+        self.pending_mcp_tools_view = None;
         self.bottom_pane
             .show_selection_view(self.mcp_manager_popup_params());
-        self.submit_op(Op::ListMcpTools);
+        self.request_redraw();
+        self.app_event_tx.send(AppEvent::FetchMcpInventory {
+            detail: McpServerStatusDetail::ToolsAndAuthOnly,
+        });
+    }
+
+    fn add_mcp_inventory_output(&mut self, detail: McpServerStatusDetail) {
+        self.flush_answer_stream_with_separator();
+        self.flush_active_cell();
+        self.active_cell = Some(Box::new(history_cell::new_mcp_inventory_loading(
+            self.config.animations,
+        )));
+        self.bump_active_cell_revision();
+        self.request_redraw();
+        self.app_event_tx
+            .send(AppEvent::FetchMcpInventory { detail });
     }
 
     pub(crate) fn open_mcp_server_actions(&mut self, name: String) {
@@ -45,13 +68,15 @@ impl ChatWidget {
     }
 
     pub(crate) fn view_mcp_server_tools(&mut self, name: String) {
-        if let Some(snapshot) = self.mcp_snapshot.clone() {
-            self.add_mcp_server_history(name, snapshot);
+        if let Some(status) = self.mcp_status_snapshot.get(name.as_str()).cloned() {
+            self.add_mcp_server_history(status);
             return;
         }
 
         self.pending_mcp_tools_view = Some(name);
-        self.submit_op(Op::ListMcpTools);
+        self.app_event_tx.send(AppEvent::FetchMcpInventory {
+            detail: McpServerStatusDetail::ToolsAndAuthOnly,
+        });
     }
 
     pub(crate) fn sync_mcp_config(&mut self, config: &codex_core::config::Config) {
@@ -79,26 +104,32 @@ impl ChatWidget {
         }
     }
 
-    pub(crate) fn on_list_mcp_tools(&mut self, ev: McpListToolsResponseEvent) {
-        self.mcp_snapshot = Some(ev.clone());
+    pub(crate) fn on_mcp_inventory_loaded(&mut self, statuses: Vec<McpServerStatus>) {
+        self.mcp_status_snapshot = statuses
+            .into_iter()
+            .map(|status| (status.name.clone(), status))
+            .collect();
 
         if let Some(server_name) = self.pending_mcp_tools_view.take() {
-            self.add_mcp_server_history(server_name, ev);
+            if let Some(status) = self.mcp_status_snapshot.get(server_name.as_str()).cloned() {
+                self.add_mcp_server_history(status);
+            } else {
+                self.add_error_message(format!(
+                    "Failed to load MCP inventory for `{server_name}`."
+                ));
+            }
             return;
         }
 
         self.refresh_mcp_manager_views();
     }
 
-    fn add_mcp_server_history(&mut self, server_name: String, snapshot: McpListToolsResponseEvent) {
+    fn add_mcp_server_history(&mut self, status: McpServerStatus) {
         self.active_mcp_action_server = None;
-        self.add_to_history(history_cell::new_filtered_mcp_tools_output(
+        self.add_to_history(history_cell::new_mcp_tools_output_from_statuses(
             &self.config,
-            snapshot.tools,
-            snapshot.resources,
-            snapshot.resource_templates,
-            &snapshot.auth_statuses,
-            server_name.as_str(),
+            &[status],
+            McpServerStatusDetail::ToolsAndAuthOnly,
         ));
     }
 
@@ -113,13 +144,12 @@ impl ChatWidget {
             "Manage globally configured MCP servers from /mcp.".dim(),
         ));
 
-        let snapshot = self.mcp_snapshot.as_ref();
         let items = names
             .into_iter()
             .filter_map(|name| {
                 let config = servers.get(name.as_str())?;
                 let search_value = format!("{name} {}", mcp_transport_summary(&config.transport));
-                let description = self.manager_row_description(name.as_str(), config, snapshot);
+                let description = self.manager_row_description(name.as_str(), config);
                 Some(SelectionItem {
                     name: name.clone(),
                     description: Some(description),
@@ -153,26 +183,14 @@ impl ChatWidget {
         let Some(config) = servers.get(server_name) else {
             return self.mcp_manager_popup_params();
         };
+        let status = self.mcp_status_snapshot.get(server_name);
 
-        let auth_status = self
-            .mcp_snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.auth_statuses.get(server_name))
-            .copied()
-            .unwrap_or(McpAuthStatus::Unsupported);
-        let tool_count = self
-            .mcp_snapshot
-            .as_ref()
-            .map_or(0, |snapshot| server_tool_count(snapshot, server_name));
-        let resource_count = self.mcp_snapshot.as_ref().map_or(0, |snapshot| {
-            snapshot.resources.get(server_name).map_or(0, Vec::len)
-        });
-        let resource_template_count = self.mcp_snapshot.as_ref().map_or(0, |snapshot| {
-            snapshot
-                .resource_templates
-                .get(server_name)
-                .map_or(0, Vec::len)
-        });
+        let auth_status = status
+            .map(|current| app_server_auth_status_display(current.auth_status))
+            .unwrap_or_else(|| McpAuthStatus::Unsupported.to_string());
+        let tool_count = status.map_or(0, |current| current.tools.len());
+        let resource_count = status.map_or(0, |current| current.resources.len());
+        let resource_template_count = status.map_or(0, |current| current.resource_templates.len());
 
         let mut header = ColumnRenderable::new();
         header.push(Line::from(server_name.to_string().bold()));
@@ -246,17 +264,16 @@ impl ChatWidget {
         }
     }
 
-    fn manager_row_description(
-        &self,
-        server_name: &str,
-        config: &McpServerConfig,
-        snapshot: Option<&McpListToolsResponseEvent>,
-    ) -> String {
-        let auth_status = snapshot
-            .and_then(|current| current.auth_statuses.get(server_name))
-            .copied()
-            .unwrap_or(McpAuthStatus::Unsupported);
-        let tool_count = snapshot.map_or(0, |current| server_tool_count(current, server_name));
+    fn manager_row_description(&self, server_name: &str, config: &McpServerConfig) -> String {
+        let auth_status = self
+            .mcp_status_snapshot
+            .get(server_name)
+            .map(|current| app_server_auth_status_display(current.auth_status))
+            .unwrap_or_else(|| McpAuthStatus::Unsupported.to_string());
+        let tool_count = self
+            .mcp_status_snapshot
+            .get(server_name)
+            .map_or(0, |current| current.tools.len());
         let status = mcp_status_line(config);
         format!(
             "{status} · Auth: {auth_status} · Tools: {tool_count} · {}",
@@ -274,12 +291,21 @@ impl ChatWidget {
         servers_value.clone().try_into().unwrap_or_default()
     }
 
-    fn global_mcp_config_path(&self) -> Option<std::path::PathBuf> {
+    fn global_mcp_config_path(&self) -> Option<PathBuf> {
         let user_layer = self.config.config_layer_stack.get_user_layer()?;
         match &user_layer.name {
             ConfigLayerSource::User { file } => Some(file.as_path().to_path_buf()),
             _ => None,
         }
+    }
+}
+
+fn app_server_auth_status_display(status: AppServerMcpAuthStatus) -> String {
+    match status {
+        AppServerMcpAuthStatus::Unsupported => McpAuthStatus::Unsupported.to_string(),
+        AppServerMcpAuthStatus::NotLoggedIn => McpAuthStatus::NotLoggedIn.to_string(),
+        AppServerMcpAuthStatus::BearerToken => McpAuthStatus::BearerToken.to_string(),
+        AppServerMcpAuthStatus::OAuth => McpAuthStatus::OAuth.to_string(),
     }
 }
 
@@ -295,20 +321,13 @@ fn mcp_transport_summary(transport: &McpServerTransportConfig) -> String {
     match transport {
         McpServerTransportConfig::Stdio { command, args, .. } => {
             if args.is_empty() {
-                command.clone()
+                format!("stdio · {command}")
             } else {
-                format!("{command} {}", args.join(" "))
+                format!("stdio · {} {}", command, args.join(" "))
             }
         }
-        McpServerTransportConfig::StreamableHttp { url, .. } => url.clone(),
+        McpServerTransportConfig::StreamableHttp { url, .. } => {
+            format!("http · {url}")
+        }
     }
-}
-
-fn server_tool_count(snapshot: &McpListToolsResponseEvent, server_name: &str) -> usize {
-    let prefix = format!("mcp__{server_name}__");
-    snapshot
-        .tools
-        .keys()
-        .filter(|name| name.starts_with(prefix.as_str()))
-        .count()
 }

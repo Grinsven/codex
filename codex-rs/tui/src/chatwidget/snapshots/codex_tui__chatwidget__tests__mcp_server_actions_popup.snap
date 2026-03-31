@@ -1,10 +1,11 @@
 ---
 source: tui/src/chatwidget/tests.rs
+assertion_line: 9675
 expression: popup
 ---
   docs
   Enabled
-  Transport: docs-server --port 4000
+  Transport: stdio · docs-server --port 4000
   Config: [codex-home]/config.toml
   Auth: Unsupported
   Tools: 0 · Resources: 0 · Resource templates: 0

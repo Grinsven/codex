@@ -84,6 +84,98 @@ impl App {
         }
     }
 
+
+    pub(super) async fn set_mcp_server_enabled(
+        &mut self,
+        app_server: &mut AppServerSession,
+        name: String,
+        enabled: bool,
+    ) {
+        let edit = if enabled {
+            ConfigEdit::ClearPath {
+                segments: vec![
+                    "mcp_servers".to_string(),
+                    name.clone(),
+                    "enabled".to_string(),
+                ],
+            }
+        } else {
+            ConfigEdit::SetPath {
+                segments: vec![
+                    "mcp_servers".to_string(),
+                    name.clone(),
+                    "enabled".to_string(),
+                ],
+                value: false.into(),
+            }
+        };
+
+        match ConfigEditsBuilder::new(&self.config.codex_home)
+            .with_edits([edit])
+            .apply()
+            .await
+        {
+            Ok(()) => {
+                if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+                    self.chat_widget.add_error_message(format!(
+                        "Updated MCP config for {name}, but failed to reload config: {err}"
+                    ));
+                    return;
+                }
+
+                self.chat_widget.sync_mcp_config(&self.config);
+                self.chat_widget.refresh_mcp_manager_views();
+                if let Err(err) = app_server.reload_user_config().await {
+                    self.chat_widget.add_error_message(format!(
+                        "Updated MCP config for {name}, but failed to reload user config: {err}"
+                    ));
+                } else if let Err(err) = app_server.mcp_server_refresh().await {
+                    self.chat_widget.add_error_message(format!(
+                        "Updated MCP config for {name}, but failed to refresh MCP servers: {err}"
+                    ));
+                } else {
+                    let status = if enabled { "enabled" } else { "disabled" };
+                    self.chat_widget.add_info_message(
+                        format!("MCP server {name} {status}"),
+                        /*hint*/ None,
+                    );
+                }
+            }
+            Err(err) => {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to update MCP server config for {name}: {err}"
+                ));
+            }
+        }
+    }
+
+    pub(super) async fn reconnect_mcp_server(
+        &mut self,
+        app_server: &mut AppServerSession,
+        name: String,
+    ) {
+        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+            self.chat_widget.add_error_message(format!(
+                "Failed to reload config before reconnecting {name}: {err}"
+            ));
+            return;
+        }
+
+        self.chat_widget.sync_mcp_config(&self.config);
+        self.chat_widget.refresh_mcp_manager_views();
+        if let Err(err) = app_server.reload_user_config().await {
+            self.chat_widget.add_error_message(format!(
+                "Failed to reload user config before reconnecting {name}: {err}"
+            ));
+        } else if let Err(err) = app_server.mcp_server_refresh().await {
+            self.chat_widget
+                .add_error_message(format!("Failed to reconnect MCP servers for {name}: {err}"));
+        } else {
+            self.chat_widget
+                .add_info_message(format!("Reconnected MCP servers for {name}"), /*hint*/ None);
+        }
+    }
+
     pub(super) fn set_approvals_reviewer_in_app_and_widget(&mut self, reviewer: ApprovalsReviewer) {
         self.config.approvals_reviewer = reviewer;
         self.chat_widget.set_approvals_reviewer(reviewer);

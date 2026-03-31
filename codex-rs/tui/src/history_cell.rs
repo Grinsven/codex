@@ -3431,11 +3431,10 @@ mod tests {
     #[tokio::test]
     async fn mcp_tools_output_lists_tools_for_hyphenated_server_names() {
         let mut config = test_config().await;
-        let mut servers = config.mcp_servers.get().clone();
-        servers.insert(
+        let servers = HashMap::from([(
             "some-server".to_string(),
             stdio_server_config("docs-server", vec!["--stdio"], /*env*/ None, vec![]),
-        );
+        )]);
         config
             .mcp_servers
             .set(servers)

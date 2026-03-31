@@ -95,6 +95,7 @@ use codex_app_server_protocol::GuardianApprovalReviewAction;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::McpServerStartupState;
+use codex_app_server_protocol::McpServerStatus;
 use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::McpServerStatusUpdatedNotification;
 use codex_app_server_protocol::ModelVerification as AppServerModelVerification;
@@ -371,6 +372,7 @@ mod interrupts;
 use self::interrupts::InterruptManager;
 mod session_header;
 use self::session_header::SessionHeader;
+mod mcp;
 mod skills;
 mod slash_dispatch;
 use self::skills::collect_tool_mentions;
@@ -812,6 +814,9 @@ pub(crate) struct ChatWidget {
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_switch_prompt: RateLimitSwitchPromptState,
     add_credits_nudge_email_in_flight: Option<AddCreditsNudgeCreditType>,
+    active_mcp_action_server: Option<String>,
+    pending_mcp_tools_view: Option<String>,
+    mcp_status_snapshot: HashMap<String, McpServerStatus>,
     adaptive_chunking: AdaptiveChunkingPolicy,
     // Stream lifecycle controller
     stream_controller: Option<StreamController>,
@@ -5205,6 +5210,9 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             add_credits_nudge_email_in_flight: None,
+            active_mcp_action_server: None,
+            pending_mcp_tools_view: None,
+            mcp_status_snapshot: HashMap::new(),
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -10461,23 +10469,6 @@ impl ChatWidget {
             resume_cmd.cyan(),
         ];
         PlainHistoryCell::new(vec![line.into()])
-    }
-
-    /// Begin the asynchronous MCP inventory flow: show a loading spinner and
-    /// request the app-server fetch via `AppEvent::FetchMcpInventory`.
-    ///
-    /// The spinner lives in `active_cell` and is cleared by
-    /// [`clear_mcp_inventory_loading`] once the result arrives.
-    pub(crate) fn add_mcp_output(&mut self, detail: McpServerStatusDetail) {
-        self.flush_answer_stream_with_separator();
-        self.flush_active_cell();
-        self.active_cell = Some(Box::new(history_cell::new_mcp_inventory_loading(
-            self.config.animations,
-        )));
-        self.bump_active_cell_revision();
-        self.request_redraw();
-        self.app_event_tx
-            .send(AppEvent::FetchMcpInventory { detail });
     }
 
     /// Remove the MCP loading spinner if it is still the active cell.

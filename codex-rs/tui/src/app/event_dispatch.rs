@@ -1385,6 +1385,18 @@ impl App {
                     .handle_start_side(tui, app_server, parent_thread_id, user_message)
                     .await;
             }
+            AppEvent::OpenMcpServerActions { name } => {
+                self.chat_widget.open_mcp_server_actions(name);
+            }
+            AppEvent::ViewMcpServerTools { name } => {
+                self.chat_widget.view_mcp_server_tools(name);
+            }
+            AppEvent::SetMcpServerEnabled { name, enabled } => {
+                self.set_mcp_server_enabled(app_server, name, enabled).await;
+            }
+            AppEvent::ReconnectMcpServer { name } => {
+                self.reconnect_mcp_server(app_server, name).await;
+            }
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();
             }

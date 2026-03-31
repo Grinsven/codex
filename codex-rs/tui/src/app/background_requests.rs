@@ -338,11 +338,10 @@ impl App {
         }
     }
 
-    /// Process the completed MCP inventory fetch: clear the loading spinner, then
-    /// render either the full tool/resource listing or an error into chat history.
+    /// Process the completed MCP inventory fetch.
     ///
-    /// When both the local config and the app-server report zero servers, a special
-    /// "empty" cell is shown instead of the full table.
+    /// Verbose `/mcp` requests render the full inventory into history. The default
+    /// `/mcp` flow populates the interactive MCP manager popup instead.
     pub(super) fn handle_mcp_inventory_result(
         &mut self,
         result: Result<Vec<McpServerStatus>, String>,
@@ -361,16 +360,21 @@ impl App {
             }
         };
 
-        if config.mcp_servers.get().is_empty() && statuses.is_empty() {
+        if matches!(detail, McpServerStatusDetail::Full) {
+            if config.mcp_servers.get().is_empty() && statuses.is_empty() {
+                self.chat_widget
+                    .add_to_history(history_cell::empty_mcp_output());
+                return;
+            }
+
             self.chat_widget
-                .add_to_history(history_cell::empty_mcp_output());
+                .add_to_history(history_cell::new_mcp_tools_output_from_statuses(
+                    &config, &statuses, detail,
+                ));
             return;
         }
 
-        self.chat_widget
-            .add_to_history(history_cell::new_mcp_tools_output_from_statuses(
-                &config, &statuses, detail,
-            ));
+        self.chat_widget.on_mcp_inventory_loaded(statuses);
     }
 
     pub(super) fn clear_committed_mcp_inventory_loading(&mut self) {
