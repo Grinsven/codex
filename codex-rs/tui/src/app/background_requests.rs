@@ -14,8 +14,9 @@ impl App {
     ) {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
+        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
         tokio::spawn(async move {
-            let result = fetch_all_mcp_server_statuses(request_handle, detail)
+            let result = fetch_all_mcp_server_statuses(request_handle, detail, Some(cwd))
                 .await
                 .map_err(|err| err.to_string());
             app_event_tx.send(AppEvent::McpInventoryLoaded { result, detail });
@@ -354,6 +355,7 @@ impl App {
         let statuses = match result {
             Ok(statuses) => statuses,
             Err(err) => {
+                self.chat_widget.clear_pending_mcp_inventory_request();
                 self.chat_widget
                     .add_error_message(format!("Failed to load MCP inventory: {err}"));
                 return;
@@ -362,6 +364,7 @@ impl App {
 
         if matches!(detail, McpServerStatusDetail::Full) {
             if config.mcp_servers.get().is_empty() && statuses.is_empty() {
+                self.chat_widget.clear_pending_mcp_inventory_request();
                 self.chat_widget
                     .add_to_history(history_cell::empty_mcp_output());
                 return;
@@ -396,6 +399,7 @@ impl App {
 pub(super) async fn fetch_all_mcp_server_statuses(
     request_handle: AppServerRequestHandle,
     detail: McpServerStatusDetail,
+    cwd: Option<PathBuf>,
 ) -> Result<Vec<McpServerStatus>> {
     let mut cursor = None;
     let mut statuses = Vec::new();
@@ -408,6 +412,9 @@ pub(super) async fn fetch_all_mcp_server_statuses(
                 params: ListMcpServerStatusParams {
                     cursor: cursor.clone(),
                     limit: Some(100),
+                    cwd: cwd
+                        .as_ref()
+                        .map(|cwd| cwd.to_string_lossy().to_string()),
                     detail: Some(detail),
                 },
             })

@@ -435,15 +435,12 @@ impl ThreadManager {
         self.state.list_thread_ids().await
     }
 
+    pub async fn list_threads(&self) -> Vec<Arc<CodexThread>> {
+        self.state.threads.read().await.values().cloned().collect()
+    }
+
     pub async fn refresh_mcp_servers(&self, refresh_config: McpServerRefreshConfig) {
-        let threads = self
-            .state
-            .threads
-            .read()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let threads = self.list_threads().await;
         for thread in threads {
             if let Err(err) = thread
                 .submit(Op::RefreshMcpServers {

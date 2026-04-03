@@ -83,6 +83,12 @@ pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum McpServerConfigScope {
+    Global,
+    Repo,
+}
+
 /// Distinguishes why a rate-limit refresh was requested so the completion
 /// handler can route the result correctly.
 ///
@@ -594,15 +600,24 @@ pub(crate) enum AppEvent {
         name: String,
     },
 
+    /// Re-open the MCP server manager list.
+    OpenMcpManager,
+
+    /// Open the disable-scope picker for an MCP server.
+    OpenMcpServerDisableScopePicker {
+        name: String,
+    },
+
     /// Show transcript output for a single MCP server.
     ViewMcpServerTools {
         name: String,
     },
 
-    /// Enable or disable a global MCP server.
+    /// Enable or disable an MCP server in the selected config scope.
     SetMcpServerEnabled {
         name: String,
         enabled: bool,
+        scope: McpServerConfigScope,
     },
 
     /// Reconnect configured MCP servers immediately.

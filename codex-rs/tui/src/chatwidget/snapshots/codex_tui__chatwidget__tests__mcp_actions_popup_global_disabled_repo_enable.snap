@@ -1,0 +1,16 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 466
+expression: normalize_snapshot_paths(normalized_popup)
+---
+  docs
+  Disabled
+  Transport: stdio · docs-server
+  Config: /tmp/project/.codex/config.toml
+  Auth: Unsupported
+  Tools: 0 · Resources: 0 · Resource templates: 0
+
+› 1. View tools           Show this server's tools and resources in the transcript.
+  2. Enable in this repo  Remove the repo override and enable this MCP server in the current repo.
+
+  Press enter to confirm or esc to go back

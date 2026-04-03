@@ -25,6 +25,7 @@ use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::MemoryResetResponse;
+use codex_app_server_protocol::McpServerRefreshParams;
 use codex_app_server_protocol::McpServerRefreshResponse;
 use codex_app_server_protocol::Model as ApiModel;
 use codex_app_server_protocol::ModelListParams;
@@ -836,13 +837,15 @@ impl AppServerSession {
         Ok(())
     }
 
-    pub(crate) async fn mcp_server_refresh(&mut self) -> Result<()> {
+    pub(crate) async fn mcp_server_refresh(&mut self, cwd: Option<PathBuf>) -> Result<()> {
         let request_id = self.next_request_id();
         let _: McpServerRefreshResponse = self
             .client
             .request_typed(ClientRequest::McpServerRefresh {
                 request_id,
-                params: None,
+                params: McpServerRefreshParams {
+                    cwd: cwd.map(|cwd| cwd.to_string_lossy().to_string()),
+                },
             })
             .await
             .wrap_err("config/mcpServer/reload failed in TUI")?;

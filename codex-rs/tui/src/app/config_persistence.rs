@@ -5,6 +5,32 @@
 //! loop.
 
 use super::*;
+use crate::app_event::McpServerConfigScope;
+use codex_config::config_toml::ConfigToml;
+
+async fn resolve_project_config_dir(
+    cwd: &Path,
+    project_root_markers: Option<&[String]>,
+) -> Result<PathBuf> {
+    let markers = project_root_markers
+        .filter(|markers| !markers.is_empty())
+        .map(|markers| markers.to_vec())
+        .unwrap_or_else(|| vec![".git".to_string()]);
+
+    for ancestor in cwd.ancestors() {
+        for marker in &markers {
+            if tokio::fs::metadata(ancestor.join(marker)).await.is_ok() {
+                return Ok(ancestor.to_path_buf());
+            }
+        }
+    }
+
+    Err(color_eyre::eyre::eyre!(
+        "failed to locate a project root for {}",
+        cwd.display()
+    ))
+}
+
 
 impl App {
     pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
@@ -91,26 +117,63 @@ impl App {
         name: String,
         enabled: bool,
     ) {
-        let edit = if enabled {
-            ConfigEdit::ClearPath {
-                segments: vec![
-                    "mcp_servers".to_string(),
-                    name.clone(),
-                    "enabled".to_string(),
-                ],
-            }
-        } else {
-            ConfigEdit::SetPath {
-                segments: vec![
-                    "mcp_servers".to_string(),
-                    name.clone(),
-                    "enabled".to_string(),
-                ],
+        self.set_mcp_server_enabled_with_scope(
+            app_server,
+            name,
+            enabled,
+            McpServerConfigScope::Global,
+        )
+        .await;
+    }
+
+    pub(super) async fn set_mcp_server_enabled_with_scope(
+        &mut self,
+        app_server: &mut AppServerSession,
+        name: String,
+        enabled: bool,
+        scope: McpServerConfigScope,
+    ) {
+        let segments = || {
+            vec![
+                "mcp_servers".to_string(),
+                name.clone(),
+                "enabled".to_string(),
+            ]
+        };
+        let global_enabled = self
+            .chat_widget
+            .global_mcp_servers()
+            .get(name.as_str())
+            .map(|server| server.enabled);
+        let edit = match (scope, enabled, global_enabled) {
+            (McpServerConfigScope::Repo, true, Some(false)) => ConfigEdit::SetPath {
+                segments: segments(),
+                value: true.into(),
+            },
+            (_, true, _) => ConfigEdit::ClearPath {
+                segments: segments(),
+            },
+            (_, false, _) => ConfigEdit::SetPath {
+                segments: segments(),
                 value: false.into(),
-            }
+            },
         };
 
-        match ConfigEditsBuilder::new(&self.config.codex_home)
+        let target_dir = match self
+            .mcp_config_target_dir(scope, self.chat_widget.config_ref().cwd.as_path())
+            .await
+        {
+            Ok(target_dir) => target_dir,
+            Err(err) => {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to update MCP server config for {name}: {err}"
+                ));
+                return;
+            }
+        };
+        let refresh_cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+
+        match ConfigEditsBuilder::new(&target_dir)
             .with_edits([edit])
             .apply()
             .await
@@ -125,11 +188,13 @@ impl App {
 
                 self.chat_widget.sync_mcp_config(&self.config);
                 self.chat_widget.refresh_mcp_manager_views();
-                if let Err(err) = app_server.reload_user_config().await {
+                if scope == McpServerConfigScope::Global
+                    && let Err(err) = app_server.reload_user_config().await
+                {
                     self.chat_widget.add_error_message(format!(
                         "Updated MCP config for {name}, but failed to reload user config: {err}"
                     ));
-                } else if let Err(err) = app_server.mcp_server_refresh().await {
+                } else if let Err(err) = app_server.mcp_server_refresh(Some(refresh_cwd)).await {
                     self.chat_widget.add_error_message(format!(
                         "Updated MCP config for {name}, but failed to refresh MCP servers: {err}"
                     ));
@@ -154,6 +219,7 @@ impl App {
         app_server: &mut AppServerSession,
         name: String,
     ) {
+        let refresh_cwd = self.chat_widget.config_ref().cwd.to_path_buf();
         if let Err(err) = self.refresh_in_memory_config_from_disk().await {
             self.chat_widget.add_error_message(format!(
                 "Failed to reload config before reconnecting {name}: {err}"
@@ -167,12 +233,40 @@ impl App {
             self.chat_widget.add_error_message(format!(
                 "Failed to reload user config before reconnecting {name}: {err}"
             ));
-        } else if let Err(err) = app_server.mcp_server_refresh().await {
+        } else if let Err(err) = app_server.mcp_server_refresh(Some(refresh_cwd)).await {
             self.chat_widget
                 .add_error_message(format!("Failed to reconnect MCP servers for {name}: {err}"));
         } else {
             self.chat_widget
                 .add_info_message(format!("Reconnected MCP servers for {name}"), /*hint*/ None);
+        }
+    }
+
+    async fn mcp_config_target_dir(
+        &self,
+        scope: McpServerConfigScope,
+        cwd: &Path,
+    ) -> Result<PathBuf> {
+        match scope {
+            McpServerConfigScope::Global => Ok(self.config.codex_home.clone()),
+            McpServerConfigScope::Repo => {
+                let effective_config: ConfigToml = self
+                    .config
+                    .config_layer_stack
+                    .effective_config()
+                    .try_into()
+                    .map_err(|err| color_eyre::eyre::eyre!("invalid effective config: {err}"))?;
+
+                effective_config
+                    .get_active_project(cwd)
+                    .filter(|project| project.is_trusted())
+                    .ok_or_else(|| {
+                        color_eyre::eyre::eyre!("current cwd is not inside a trusted project")
+                    })?;
+                resolve_project_config_dir(cwd, effective_config.project_root_markers.as_deref())
+                    .await
+                    .map(|path| path.join(".codex"))
+            }
         }
     }
 
@@ -649,6 +743,32 @@ fn sync_runtime_permissions_from_legacy_sandbox_policy(config: &mut Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+use crate::app_event::McpServerConfigScope;
+use codex_config::config_toml::ConfigToml;
+
+async fn resolve_project_config_dir(
+    cwd: &Path,
+    project_root_markers: Option<&[String]>,
+) -> Result<PathBuf> {
+    let markers = project_root_markers
+        .filter(|markers| !markers.is_empty())
+        .map(|markers| markers.to_vec())
+        .unwrap_or_else(|| vec![".git".to_string()]);
+
+    for ancestor in cwd.ancestors() {
+        for marker in &markers {
+            if tokio::fs::metadata(ancestor.join(marker)).await.is_ok() {
+                return Ok(ancestor.to_path_buf());
+            }
+        }
+    }
+
+    Err(color_eyre::eyre::eyre!(
+        "failed to locate a project root for {}",
+        cwd.display()
+    ))
+}
+
     use crate::app::test_support::app_enabled_in_effective_config;
     use crate::app::test_support::make_test_app;
     use crate::test_support::PathBufExt;

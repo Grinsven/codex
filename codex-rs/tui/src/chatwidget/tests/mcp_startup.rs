@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn mcp_startup_header_booting_snapshot() {
+async fn mcp_startup_updates_do_not_surface_blocking_status() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
 
@@ -14,15 +14,10 @@ async fn mcp_startup_header_booting_snapshot() {
         }),
     });
 
-    let height = chat.desired_height(/*width*/ 80);
-    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
-        .expect("create terminal");
-    terminal
-        .draw(|f| chat.render(f.area(), f.buffer_mut()))
-        .expect("draw chat widget");
-    assert_chatwidget_snapshot!(
-        "mcp_startup_header_booting",
-        normalized_backend_snapshot(terminal.backend())
+    assert!(!chat.bottom_pane.is_task_running());
+    assert!(
+        !render_bottom_first_row(&chat, /*width*/ 80).contains("Booting MCP"),
+        "expected MCP startup to stay invisible while loading"
     );
 }
 
@@ -71,7 +66,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
     );
 
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -89,7 +84,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
         .collect::<String>();
     assert!(failure_text.contains("MCP client for `alpha` failed to start: handshake failed"));
     assert!(!failure_text.contains("MCP startup incomplete"));
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -101,7 +96,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
     );
 
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -177,7 +172,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
     );
 
     let _ = drain_insert_history(&mut rx);
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.finish_mcp_startup_after_lag();
 
@@ -237,7 +232,7 @@ async fn app_server_mcp_startup_after_lag_can_settle_without_starting_updates() 
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
     assert!(failure_text.contains("MCP client for `alpha` failed to start: handshake failed"));
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -392,7 +387,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
         /*replay_kind*/ None,
     );
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -453,7 +448,7 @@ async fn app_server_mcp_startup_next_round_keeps_terminal_statuses_after_startin
         /*replay_kind*/ None,
     );
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -488,7 +483,7 @@ async fn app_server_mcp_startup_next_round_with_empty_expected_servers_reactivat
         /*replay_kind*/ None,
     );
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
@@ -530,7 +525,7 @@ async fn app_server_mcp_startup_after_lag_with_empty_expected_servers_preserves_
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
     assert!(warning_text.contains("MCP client for `runtime` failed to start: handshake failed"));
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.finish_mcp_startup_after_lag();
 
@@ -564,7 +559,7 @@ async fn app_server_mcp_startup_after_lag_includes_runtime_servers_with_expected
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
     assert!(warning_text.contains("MCP client for `runtime` failed to start: handshake failed"));
-    assert!(chat.bottom_pane.is_task_running());
+    assert!(!chat.bottom_pane.is_task_running());
 
     chat.finish_mcp_startup_after_lag();
 

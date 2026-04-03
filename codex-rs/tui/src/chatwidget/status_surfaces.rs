@@ -616,10 +616,6 @@ impl ChatWidget {
     /// Startup takes precedence over normal task states, and idle state renders
     /// as `Ready` regardless of the last active status bucket.
     pub(super) fn terminal_title_status_text(&self) -> String {
-        if self.mcp_startup_status.is_some() {
-            return "Starting".to_string();
-        }
-
         match self.terminal_title_status_kind {
             TerminalTitleStatusKind::Working if !self.bottom_pane.is_task_running() => {
                 "Ready".to_string()
@@ -666,8 +662,7 @@ impl ChatWidget {
     }
 
     fn terminal_title_has_active_progress(&self) -> bool {
-        self.mcp_startup_status.is_some()
-            || self.bottom_pane.is_task_running()
+        self.bottom_pane.is_task_running()
             || self.terminal_title_status_kind == TerminalTitleStatusKind::Undoing
     }
 

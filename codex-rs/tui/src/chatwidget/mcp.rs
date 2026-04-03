@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use super::ChatWidget;
 use crate::app_event::AppEvent;
+use crate::app_event::McpServerConfigScope;
 use crate::bottom_pane::ColumnWidthMode;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
@@ -13,14 +14,15 @@ use codex_app_server_protocol::ConfigLayerSource;
 use codex_app_server_protocol::McpAuthStatus as AppServerMcpAuthStatus;
 use codex_app_server_protocol::McpServerStatus;
 use codex_app_server_protocol::McpServerStatusDetail;
-use codex_core::config::types::McpServerConfig;
-use codex_core::config::types::McpServerTransportConfig;
+use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_protocol::protocol::McpAuthStatus;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 const MCP_MANAGER_SELECTION_VIEW_ID: &str = "mcp-manager-selection";
 const MCP_SERVER_ACTIONS_VIEW_ID: &str = "mcp-server-actions";
+const MCP_SERVER_DISABLE_SCOPE_VIEW_ID: &str = "mcp-server-disable-scope";
 
 impl ChatWidget {
     pub(crate) fn add_mcp_output(&mut self, detail: McpServerStatusDetail) {
@@ -29,16 +31,19 @@ impl ChatWidget {
             return;
         }
 
-        if self.global_mcp_servers().is_empty() {
+        if self.managed_mcp_servers().is_empty() {
             self.add_to_history(history_cell::empty_mcp_output());
             return;
         }
 
         self.active_mcp_action_server = None;
         self.pending_mcp_tools_view = None;
-        self.bottom_pane
-            .show_selection_view(self.mcp_manager_popup_params());
-        self.request_redraw();
+        self.pending_mcp_manager_open = self.mcp_status_snapshot.is_empty();
+        if !self.pending_mcp_manager_open {
+            self.bottom_pane
+                .show_selection_view(self.mcp_manager_popup_params());
+            self.request_redraw();
+        }
         self.app_event_tx.send(AppEvent::FetchMcpInventory {
             detail: McpServerStatusDetail::ToolsAndAuthOnly,
         });
@@ -57,14 +62,25 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_mcp_server_actions(&mut self, name: String) {
-        if !self.global_mcp_servers().contains_key(name.as_str()) {
-            self.add_error_message(format!("No global MCP server named `{name}`."));
+        if !self.managed_mcp_servers().contains_key(name.as_str()) {
+            self.add_error_message(format!("No MCP server named `{name}`."));
             return;
         }
 
         self.active_mcp_action_server = Some(name.clone());
         self.bottom_pane
             .show_selection_view(self.mcp_server_actions_popup_params(&name));
+    }
+
+    pub(crate) fn open_mcp_server_disable_scope_picker(&mut self, name: String) {
+        if !self.managed_mcp_servers().contains_key(name.as_str()) {
+            self.add_error_message(format!("No MCP server named `{name}`."));
+            return;
+        }
+
+        self.active_mcp_action_server = Some(name.clone());
+        self.bottom_pane
+            .show_selection_view(self.mcp_server_disable_scope_popup_params(&name));
     }
 
     pub(crate) fn view_mcp_server_tools(&mut self, name: String) {
@@ -94,7 +110,10 @@ impl ChatWidget {
             return;
         };
 
-        if self.global_mcp_servers().contains_key(server_name.as_str()) {
+        if self
+            .managed_mcp_servers()
+            .contains_key(server_name.as_str())
+        {
             let _ = self.bottom_pane.replace_selection_view_if_active(
                 MCP_SERVER_ACTIONS_VIEW_ID,
                 self.mcp_server_actions_popup_params(&server_name),
@@ -121,7 +140,20 @@ impl ChatWidget {
             return;
         }
 
+        if self.pending_mcp_manager_open {
+            self.pending_mcp_manager_open = false;
+            self.bottom_pane
+                .show_selection_view(self.mcp_manager_popup_params());
+            self.request_redraw();
+            return;
+        }
+
         self.refresh_mcp_manager_views();
+    }
+
+    pub(crate) fn clear_pending_mcp_inventory_request(&mut self) {
+        self.pending_mcp_manager_open = false;
+        self.pending_mcp_tools_view = None;
     }
 
     fn add_mcp_server_history(&mut self, status: McpServerStatus) {
@@ -134,14 +166,14 @@ impl ChatWidget {
     }
 
     fn mcp_manager_popup_params(&self) -> SelectionViewParams {
-        let servers = self.global_mcp_servers();
+        let servers = self.managed_mcp_servers();
         let mut names: Vec<String> = servers.keys().cloned().collect();
         names.sort();
 
         let mut header = ColumnRenderable::new();
         header.push(Line::from("MCP Servers".bold()));
         header.push(Line::from(
-            "Manage globally configured MCP servers from /mcp.".dim(),
+            "Manage MCP servers from /mcp. Repo overrides apply to the current cwd.".dim(),
         ));
 
         let items = names
@@ -179,11 +211,16 @@ impl ChatWidget {
     }
 
     fn mcp_server_actions_popup_params(&self, server_name: &str) -> SelectionViewParams {
-        let servers = self.global_mcp_servers();
-        let Some(config) = servers.get(server_name) else {
+        let managed_servers = self.managed_mcp_servers();
+        let Some(config) = managed_servers.get(server_name).cloned() else {
             return self.mcp_manager_popup_params();
         };
+        let global_servers = self.global_mcp_servers();
+        let global_config = global_servers.get(server_name).cloned();
         let status = self.mcp_status_snapshot.get(server_name);
+        let repo_override_active = global_config
+            .as_ref()
+            .is_some_and(|global| global.enabled != config.enabled);
 
         let auth_status = status
             .map(|current| app_server_auth_status_display(current.auth_status))
@@ -194,12 +231,17 @@ impl ChatWidget {
 
         let mut header = ColumnRenderable::new();
         header.push(Line::from(server_name.to_string().bold()));
-        header.push(Line::from(mcp_status_line(config).dim()));
+        header.push(Line::from(mcp_status_line(&config).dim()));
         header.push(Line::from(
             format!("Transport: {}", mcp_transport_summary(&config.transport)).dim(),
         ));
         if let Some(path) = self.global_mcp_config_path() {
             header.push(Line::from(format!("Config: {}", path.display()).dim()));
+        }
+        if repo_override_active {
+            header.push(Line::from("Repo override active for current cwd.".dim()));
+        } else if global_config.is_none() {
+            header.push(Line::from("Repo-local server for current cwd.".dim()));
         }
         header.push(Line::from(format!("Auth: {auth_status}").dim()));
         header.push(Line::from(
@@ -232,23 +274,45 @@ impl ChatWidget {
             });
         }
 
-        let toggle_name = if config.enabled { "Disable" } else { "Enable" };
-        let toggle_description = if config.enabled {
-            "Disable this MCP server."
+        let enable_scope = if repo_override_active
+            || global_config
+                .as_ref()
+                .map_or(true, |global| !global.enabled)
+        {
+            McpServerConfigScope::Repo
         } else {
-            "Enable this MCP server."
+            McpServerConfigScope::Global
+        };
+        let toggle_name = if config.enabled {
+            "Disable".to_string()
+        } else if enable_scope == McpServerConfigScope::Repo {
+            "Enable in this repo".to_string()
+        } else {
+            "Enable globally".to_string()
+        };
+        let toggle_description = if config.enabled {
+            "Choose whether to disable this MCP server globally or only in this repo."
+        } else if enable_scope == McpServerConfigScope::Repo {
+            "Remove the repo override and enable this MCP server in the current repo."
+        } else {
+            "Enable this MCP server everywhere your user config applies."
         };
         items.push(SelectionItem {
-            name: toggle_name.to_string(),
+            name: toggle_name,
             description: Some(toggle_description.to_string()),
             actions: vec![Box::new({
                 let name = server_name.to_string();
-                let enabled = !config.enabled;
+                let currently_enabled = config.enabled;
                 move |tx| {
-                    tx.send(AppEvent::SetMcpServerEnabled {
-                        name: name.clone(),
-                        enabled,
-                    })
+                    if currently_enabled {
+                        tx.send(AppEvent::OpenMcpServerDisableScopePicker { name: name.clone() })
+                    } else {
+                        tx.send(AppEvent::SetMcpServerEnabled {
+                            name: name.clone(),
+                            enabled: true,
+                            scope: enable_scope,
+                        })
+                    }
                 }
             })],
             ..Default::default()
@@ -259,6 +323,69 @@ impl ChatWidget {
             header: Box::new(header),
             footer_hint: Some(standard_popup_hint_line()),
             items,
+            on_cancel: Some(Box::new(move |tx| tx.send(AppEvent::OpenMcpManager))),
+            col_width_mode: ColumnWidthMode::AutoAllRows,
+            ..Default::default()
+        }
+    }
+
+    fn mcp_server_disable_scope_popup_params(&self, server_name: &str) -> SelectionViewParams {
+        let mut header = ColumnRenderable::new();
+        header.push(Line::from("Disable MCP server".bold()));
+        header.push(Line::from(server_name.to_string().bold()));
+        header.push(Line::from(
+            "Choose whether to disable this server globally or only in this repo.".dim(),
+        ));
+
+        let mut items = Vec::new();
+        if self.global_mcp_servers().contains_key(server_name) {
+            items.push(SelectionItem {
+                name: "Disable globally".to_string(),
+                description: Some(
+                    "Turn this MCP server off everywhere your user config applies.".to_string(),
+                ),
+                actions: vec![Box::new({
+                    let name = server_name.to_string();
+                    move |tx| {
+                        tx.send(AppEvent::SetMcpServerEnabled {
+                            name: name.clone(),
+                            enabled: false,
+                            scope: McpServerConfigScope::Global,
+                        })
+                    }
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+        items.push(SelectionItem {
+            name: "Disable in this repo".to_string(),
+            description: Some(
+                "Only turn this MCP server off for the current repo/worktree.".to_string(),
+            ),
+            actions: vec![Box::new({
+                let name = server_name.to_string();
+                move |tx| {
+                    tx.send(AppEvent::SetMcpServerEnabled {
+                        name: name.clone(),
+                        enabled: false,
+                        scope: McpServerConfigScope::Repo,
+                    })
+                }
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        SelectionViewParams {
+            view_id: Some(MCP_SERVER_DISABLE_SCOPE_VIEW_ID),
+            header: Box::new(header),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            on_cancel: Some(Box::new({
+                let name = server_name.to_string();
+                move |tx| tx.send(AppEvent::OpenMcpServerActions { name: name.clone() })
+            })),
             col_width_mode: ColumnWidthMode::AutoAllRows,
             ..Default::default()
         }
@@ -281,7 +408,15 @@ impl ChatWidget {
         )
     }
 
-    fn global_mcp_servers(&self) -> HashMap<String, McpServerConfig> {
+    fn managed_mcp_servers(&self) -> HashMap<String, McpServerConfig> {
+        let mut servers = self.config.mcp_servers.get().clone();
+        for (name, config) in self.global_mcp_servers() {
+            servers.entry(name).or_insert(config);
+        }
+        servers
+    }
+
+    pub(crate) fn global_mcp_servers(&self) -> HashMap<String, McpServerConfig> {
         let Some(user_layer) = self.config.config_layer_stack.get_user_layer() else {
             return HashMap::new();
         };

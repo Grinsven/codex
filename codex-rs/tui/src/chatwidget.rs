@@ -815,6 +815,7 @@ pub(crate) struct ChatWidget {
     rate_limit_switch_prompt: RateLimitSwitchPromptState,
     add_credits_nudge_email_in_flight: Option<AddCreditsNudgeCreditType>,
     active_mcp_action_server: Option<String>,
+    pending_mcp_manager_open: bool,
     pending_mcp_tools_view: Option<String>,
     mcp_status_snapshot: HashMap<String, McpServerStatus>,
     adaptive_chunking: AdaptiveChunkingPolicy,
@@ -1811,8 +1812,7 @@ impl ChatWidget {
     /// The bottom pane only has one running flag, but this module treats it as a derived state of
     /// both the agent turn lifecycle and MCP startup lifecycle.
     fn update_task_running_state(&mut self) {
-        self.bottom_pane
-            .set_task_running(self.agent_turn_running || self.mcp_startup_status.is_some());
+        self.bottom_pane.set_task_running(self.agent_turn_running);
         self.refresh_status_surfaces();
     }
 
@@ -5211,6 +5211,7 @@ impl ChatWidget {
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             add_credits_nudge_email_in_flight: None,
             active_mcp_action_server: None,
+            pending_mcp_manager_open: false,
             pending_mcp_tools_view: None,
             mcp_status_snapshot: HashMap::new(),
             adaptive_chunking: AdaptiveChunkingPolicy::default(),

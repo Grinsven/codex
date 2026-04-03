@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 438
+expression: popup
+---
+  MCP Servers
+  Manage MCP servers from /mcp. Repo overrides apply to the current cwd.
+
+  Type to search MCP servers
+› docs  Press Enter to manage this MCP server.
+
+  Press enter to confirm or esc to go back

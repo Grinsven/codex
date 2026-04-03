@@ -5715,8 +5715,13 @@ impl CodexMessageProcessor {
         self.outgoing.send_response(request_id, response).await;
     }
 
-    async fn mcp_server_refresh(&self, request_id: ConnectionRequestId, _params: Option<()>) {
-        let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+    async fn mcp_server_refresh(
+        &self,
+        request_id: ConnectionRequestId,
+        params: McpServerRefreshParams,
+    ) {
+        let fallback_cwd = params.cwd.map(PathBuf::from);
+        let config = match self.load_latest_config(fallback_cwd.clone()).await {
             Ok(config) => config,
             Err(error) => {
                 self.outgoing.send_error(request_id, error).await;
@@ -5724,7 +5729,10 @@ impl CodexMessageProcessor {
             }
         };
 
-        if let Err(error) = self.queue_mcp_server_refresh_for_config(&config).await {
+        if let Err(error) = self
+            .queue_mcp_server_refresh_for_config(&config, fallback_cwd.as_deref())
+            .await
+        {
             self.outgoing.send_error(request_id, error).await;
             return;
         }
@@ -5736,47 +5744,72 @@ impl CodexMessageProcessor {
     async fn queue_mcp_server_refresh_for_config(
         &self,
         config: &Config,
+        fallback_cwd: Option<&Path>,
     ) -> Result<(), JSONRPCErrorError> {
-        let configured_servers = self
-            .thread_manager
-            .mcp_manager()
-            .configured_servers(config)
-            .await;
-        let mcp_servers = match serde_json::to_value(configured_servers) {
-            Ok(value) => value,
-            Err(err) => {
-                return Err(JSONRPCErrorError {
-                    code: INTERNAL_ERROR_CODE,
-                    message: format!("failed to serialize MCP servers: {err}"),
-                    data: None,
-                });
-            }
-        };
+        let threads = self.thread_manager.list_threads().await;
+        if threads.is_empty() {
+            return Ok(());
+        }
 
-        let mcp_oauth_credentials_store_mode =
-            match serde_json::to_value(config.mcp_oauth_credentials_store_mode) {
-                Ok(value) => value,
+        let default_refresh_config = self.serialize_mcp_server_refresh_config(config)?;
+        for thread in threads {
+            let thread_cwd = thread.config_snapshot().await.cwd;
+            let thread_config = match self.load_latest_config(Some(thread_cwd.clone())).await {
+                Ok(config) => config,
                 Err(err) => {
-                    return Err(JSONRPCErrorError {
-                        code: INTERNAL_ERROR_CODE,
-                        message: format!(
-                            "failed to serialize MCP OAuth credentials store mode: {err}"
-                        ),
-                        data: None,
-                    });
+                    if fallback_cwd.is_some() {
+                        tracing::warn!(
+                            "failed to load thread-specific MCP refresh config for {}: {err:?}",
+                            thread_cwd.display()
+                        );
+                        config.clone()
+                    } else {
+                        return Err(err);
+                    }
                 }
             };
+            let refresh_config = if thread_config.cwd == config.cwd {
+                default_refresh_config.clone()
+            } else {
+                self.serialize_mcp_server_refresh_config(&thread_config)?
+            };
+            if let Err(err) = thread
+                .submit(Op::RefreshMcpServers {
+                    config: refresh_config,
+                })
+                .await
+            {
+                warn!("failed to request MCP server refresh: {err}");
+            }
+        }
+        Ok(())
+    }
 
-        let refresh_config = McpServerRefreshConfig {
+    fn serialize_mcp_server_refresh_config(
+        &self,
+        config: &Config,
+    ) -> Result<McpServerRefreshConfig, JSONRPCErrorError> {
+        let configured_servers = self.thread_manager.mcp_manager().configured_servers(config);
+        let mcp_servers =
+            serde_json::to_value(configured_servers).map_err(|err| JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: format!("failed to serialize MCP servers: {err}"),
+                data: None,
+            })?;
+
+        let mcp_oauth_credentials_store_mode =
+            serde_json::to_value(config.mcp_oauth_credentials_store_mode).map_err(|err| {
+                JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to serialize MCP OAuth credentials store mode: {err}"),
+                    data: None,
+                }
+            })?;
+
+        Ok(McpServerRefreshConfig {
             mcp_servers,
             mcp_oauth_credentials_store_mode,
-        };
-
-        // Refresh requests are queued per thread; each thread rebuilds MCP connections on its next
-        // active turn to avoid work for threads that never resume.
-        let thread_manager = Arc::clone(&self.thread_manager);
-        thread_manager.refresh_mcp_servers(refresh_config).await;
-        Ok(())
+        })
     }
 
     async fn mcp_server_oauth_login(
@@ -5897,7 +5930,8 @@ impl CodexMessageProcessor {
         let request = request_id.clone();
 
         let outgoing = Arc::clone(&self.outgoing);
-        let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+        let fallback_cwd = params.cwd.as_ref().map(PathBuf::from);
+        let config = match self.load_latest_config(fallback_cwd).await {
             Ok(config) => config,
             Err(error) => {
                 self.outgoing.send_error(request, error).await;

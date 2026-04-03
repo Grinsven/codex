@@ -2487,6 +2487,9 @@ pub struct ListMcpServerStatusParams {
     /// Optional page size; defaults to a server-defined value.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
+    /// Optional working directory used to resolve project-local config layers.
+    #[ts(optional = nullable)]
+    pub cwd: Option<String>,
     /// Controls how much MCP inventory data to fetch for each server.
     /// Defaults to `Full` when omitted.
     #[ts(optional = nullable)]
@@ -2724,7 +2727,11 @@ pub struct AppListUpdatedNotification {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct McpServerRefreshParams {}
+pub struct McpServerRefreshParams {
+    /// Optional working directory used to resolve project-local config layers.
+    #[ts(optional = nullable)]
+    pub cwd: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

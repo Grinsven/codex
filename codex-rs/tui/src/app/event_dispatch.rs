@@ -1385,14 +1385,26 @@ impl App {
                     .handle_start_side(tui, app_server, parent_thread_id, user_message)
                     .await;
             }
+            AppEvent::OpenMcpManager => {
+                self.chat_widget
+                    .add_mcp_output(McpServerStatusDetail::ToolsAndAuthOnly);
+            }
             AppEvent::OpenMcpServerActions { name } => {
                 self.chat_widget.open_mcp_server_actions(name);
+            }
+            AppEvent::OpenMcpServerDisableScopePicker { name } => {
+                self.chat_widget.open_mcp_server_disable_scope_picker(name);
             }
             AppEvent::ViewMcpServerTools { name } => {
                 self.chat_widget.view_mcp_server_tools(name);
             }
-            AppEvent::SetMcpServerEnabled { name, enabled } => {
-                self.set_mcp_server_enabled(app_server, name, enabled).await;
+            AppEvent::SetMcpServerEnabled {
+                name,
+                enabled,
+                scope,
+            } => {
+                self.set_mcp_server_enabled_with_scope(app_server, name, enabled, scope)
+                    .await;
             }
             AppEvent::ReconnectMcpServer { name } => {
                 self.reconnect_mcp_server(app_server, name).await;
