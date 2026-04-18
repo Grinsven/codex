@@ -1,0 +1,118 @@
+name: custom-branch-remote-dev
+
+on:
+  push:
+    branches:
+      - release-personal
+  workflow_dispatch:
+
+concurrency:
+  group: custom-branch-remote-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-release-binary:
+    name: Build ${{ matrix.binary }} on macOS
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: codex-cli
+            binary: codex
+          - package: codex-tui
+            binary: codex-tui
+          - package: codex-responses-api-proxy
+            binary: codex-responses-api-proxy
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+
+      - name: Reclaim runner disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$HOME/Library/Developer/Xcode/DerivedData" || true
+          rm -rf "$HOME/Library/Caches/Homebrew" || true
+          rm -rf "$HOME/.npm" || true
+          rm -rf "$HOME/.cache/pip" || true
+          xcrun simctl delete unavailable || true
+          df -h
+
+      - name: Build release binary
+        working-directory: codex-rs
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          set -euo pipefail
+          cargo clean --profile dev
+          cargo build --release -p "${{ matrix.package }}" --bin "${{ matrix.binary }}"
+
+      - name: Upload release binary artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: release-${{ matrix.binary }}-macos
+          if-no-files-found: error
+          path: codex-rs/target/release/${{ matrix.binary }}
+
+  package-release-bundle:
+    name: Combine macOS release artifacts
+    runs-on: ubuntu-latest
+    needs: build-release-binary
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download binary artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-*-macos
+          path: ${{ runner.temp }}/release-personal
+          merge-multiple: true
+
+      - name: Package release bundle
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle_root="${RUNNER_TEMP}/release-personal"
+          archive_name="release-personal-macos-${GITHUB_SHA::12}.tar.gz"
+          checksum_name="${archive_name}.sha256"
+
+          tar -C "${bundle_root}" -czf "${RUNNER_TEMP}/${archive_name}" .
+          sha256sum "${RUNNER_TEMP}/${archive_name}" > "${RUNNER_TEMP}/${checksum_name}"
+
+          {
+            echo "archive_name=${archive_name}"
+            echo "archive_path=${RUNNER_TEMP}/${archive_name}"
+            echo "checksum_path=${RUNNER_TEMP}/${checksum_name}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload combined release bundle
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ${{ steps.package.outputs.archive_name }}
+          if-no-files-found: error
+          path: |
+            ${{ steps.package.outputs.archive_path }}
+            ${{ steps.package.outputs.checksum_path }}
+
+      - name: Summarize bundle
+        shell: bash
+        run: |
+          {
+            echo '## Release-personal macOS build'
+            echo
+            echo "- Binaries built separately on macOS runners: \`codex\`, \`codex-tui\`, \`codex-responses-api-proxy\`"
+            echo "- Combined bundle: \`${{ steps.package.outputs.archive_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
