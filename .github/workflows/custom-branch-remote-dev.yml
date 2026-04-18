@@ -11,9 +11,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-cargo-sources:
+    name: Prepare shared Cargo sources on macOS
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    outputs:
+      cargo_cache_key: ${{ steps.lockhash.outputs.cargo_cache_key }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+
+      - name: Compute Cargo cache key
+        id: lockhash
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock_hash="$(shasum -a 256 Cargo.lock | cut -d' ' -f1)"
+          toolchain_hash="$(rustc --version | shasum -a 256 | cut -d' ' -f1)"
+          echo "cargo_cache_key=cargo-home-macos-release-personal-${lock_hash}-${toolchain_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore shared Cargo source cache
+        id: cargo_cache_restore
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/git/checkouts/
+          key: ${{ steps.lockhash.outputs.cargo_cache_key }}
+
+      - name: Prefetch Cargo sources
+        if: ${{ steps.cargo_cache_restore.outputs.cache-hit != 'true' }}
+        working-directory: codex-rs
+        shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+
+      - name: Save shared Cargo source cache
+        if: always() && !cancelled() && steps.cargo_cache_restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/git/checkouts/
+          key: ${{ steps.lockhash.outputs.cargo_cache_key }}
+
   build-release-binary:
     name: Build ${{ matrix.binary }} on macOS
     runs-on: macos-latest
+    needs: prepare-cargo-sources
     permissions:
       contents: read
     strategy:
@@ -35,6 +99,17 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+
+      - name: Restore shared Cargo source cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/git/checkouts/
+          key: ${{ needs.prepare-cargo-sources.outputs.cargo_cache_key }}
 
       - name: Reclaim runner disk
         shell: bash
