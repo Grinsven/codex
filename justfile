@@ -82,8 +82,15 @@ bazel-argument-comment-lint:
 bazel-remote-test:
     bazel test --test_tag_filters=-argument-comment-lint //... --config=remote --platforms=//:rbe --keep_going
 
+# Build the current Mac release artifact through Bazel/BuildBuddy.
+# The all-platform //codex-rs/cli:release_binaries target currently trips the
+# Windows V8 gnullvm toolchain on macOS developer machines.
 build-for-release:
-    bazel build //codex-rs/cli:release_binaries --config=remote
+    bazel build //codex-rs/cli:codex_macos_arm64 --config=remote --compilation_mode=opt --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
+
+# Keep the full matrix available explicitly for CI/debugging.
+build-for-release-all-platforms:
+    bazel build //codex-rs/cli:release_binaries --config=remote --compilation_mode=opt --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
 
 # Run the MCP server
 mcp-server-run *args:

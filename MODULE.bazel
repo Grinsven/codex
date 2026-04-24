@@ -287,6 +287,12 @@ bazel_dep(name = "openssl", version = "3.5.4.bcr.0")
 inject_repo(crate, "xz")
 
 crate.annotation(
+    # The musl release targets enable openssl-sys' vendored feature. rules_rs
+    # compiles the build script in an exec configuration, where per-target build
+    # deps are not always selected, so keep the build-script dependency
+    # available across platforms while OPENSSL_NO_VENDOR still points it at the
+    # Bazel-provided OpenSSL tree.
+    crate_features = ["vendored"],
     build_script_data = [
         "@openssl//:gen_dir",
     ],

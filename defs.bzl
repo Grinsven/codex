@@ -13,6 +13,8 @@ PLATFORMS = [
     "windows_arm64",
 ]
 
+CODEX_CARGO_VERSION = "0.125.0-alpha.2"
+
 RELEASE_PLATFORM_TARGETS = {
     "linux_arm64_musl": "//:release_linux_arm64_musl",
     "linux_amd64_musl": "//:release_linux_amd64_musl",
@@ -237,8 +239,8 @@ def codex_rust_crate(
             srcs = ["build.rs"],
             deps = all_crate_deps(build = True),
             data = build_script_data,
-            # Some build script deps sniff version-related env vars...
-            version = "0.0.0",
+            # Some build script deps sniff version-related env vars.
+            version = CODEX_CARGO_VERSION,
         )
 
         maybe_deps += [name + "-build-script"]
@@ -256,6 +258,7 @@ def codex_rust_crate(
             edition = crate_edition,
             rustc_flags = rustc_flags_extra,
             rustc_env = rustc_env,
+            version = CODEX_CARGO_VERSION,
             visibility = ["//visibility:public"],
         )
 
@@ -281,6 +284,7 @@ def codex_rust_crate(
                 "--remap-path-prefix=codex-rs=",
             ],
             rustc_env = rustc_env,
+            version = CODEX_CARGO_VERSION,
             data = test_data_extra,
             tags = test_tags + ["manual"],
         )
@@ -318,6 +322,7 @@ def codex_rust_crate(
             edition = crate_edition,
             rustc_flags = rustc_flags_extra + WINDOWS_RUSTC_LINK_FLAGS,
             srcs = native.glob(["src/**/*.rs"]),
+            version = CODEX_CARGO_VERSION,
             visibility = ["//visibility:public"],
         )
 
@@ -363,6 +368,7 @@ def codex_rust_crate(
                 "--remap-path-prefix=codex-rs=",
             ],
             rustc_env = rustc_env,
+            version = CODEX_CARGO_VERSION,
             # Important: do not merge `test_env` here. Its unit-test-only
             # `INSTA_WORKSPACE_ROOT="codex-rs"` is tuned for unit tests that
             # execute from the repo root and can misplace integration snapshots.
