@@ -99,6 +99,12 @@ pub(crate) enum SelectionRowDisplay {
     SingleLine,
 }
 
+#[derive(Clone, Copy)]
+enum DescriptionVariant {
+    Selected,
+    Widest,
+}
+
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
 pub(crate) type SelectionToggleAction = dyn Fn(bool, &AppEventSender) + Send + Sync;
@@ -265,6 +271,26 @@ pub(crate) struct ListSelectionView {
 
     /// Called when the picker is dismissed via Esc/Ctrl+C without selecting.
     on_cancel: OnCancelCallback,
+}
+
+fn widest_description(
+    description: Option<&String>,
+    selected_description: Option<&String>,
+) -> Option<String> {
+    match (description, selected_description) {
+        (Some(description), Some(selected_description)) => {
+            let description_width = UnicodeWidthStr::width(description.as_str());
+            let selected_width = UnicodeWidthStr::width(selected_description.as_str());
+            if selected_width > description_width {
+                Some(selected_description.clone())
+            } else {
+                Some(description.clone())
+            }
+        }
+        (Some(description), None) => Some(description.clone()),
+        (None, Some(selected_description)) => Some(selected_description.clone()),
+        (None, None) => None,
+    }
 }
 
 impl ListSelectionView {
@@ -440,7 +466,7 @@ impl ListSelectionView {
         }
     }
 
-    fn build_rows(&self) -> Vec<GenericDisplayRow> {
+    fn build_rows(&self, description_variant: DescriptionVariant) -> Vec<GenericDisplayRow> {
         self.filtered_indices
             .iter()
             .enumerate()
@@ -477,10 +503,16 @@ impl ListSelectionView {
                         name_prefix_spans.push(placeholder.into());
                     }
                     name_prefix_spans.extend(item.name_prefix_spans.clone());
-                    let description = is_selected
-                        .then(|| item.selected_description.clone())
-                        .flatten()
-                        .or_else(|| item.description.clone());
+                    let description = match description_variant {
+                        DescriptionVariant::Selected => is_selected
+                            .then(|| item.selected_description.clone())
+                            .flatten()
+                            .or_else(|| item.description.clone()),
+                        DescriptionVariant::Widest => widest_description(
+                            item.description.as_ref(),
+                            item.selected_description.as_ref(),
+                        ),
+                    };
                     let wrap_indent = description.is_none().then_some(wrap_prefix_width);
                     GenericDisplayRow {
                         name: name_with_marker,
@@ -496,6 +528,14 @@ impl ListSelectionView {
                 })
             })
             .collect()
+    }
+
+    fn measured_rows(&self) -> Vec<GenericDisplayRow> {
+        self.build_rows(DescriptionVariant::Widest)
+    }
+
+    fn rendered_rows(&self) -> Vec<GenericDisplayRow> {
+        self.build_rows(DescriptionVariant::Selected)
     }
 
     fn switch_tab(&mut self, step: isize) {
@@ -926,7 +966,7 @@ impl Renderable for ListSelectionView {
         };
 
         // Measure wrapped height for up to MAX_POPUP_ROWS items.
-        let rows = self.build_rows();
+        let rows = self.measured_rows();
         let column_width = ColumnWidthConfig::new(self.col_width_mode, self.name_column_width);
         let rows_height = match self.row_display {
             SelectionRowDisplay::Wrapped => measure_rows_height_with_col_width_mode(
@@ -1004,11 +1044,12 @@ impl Renderable for ListSelectionView {
         let header = self.active_header();
         let header_height = header.desired_height(inner_width);
         let tab_height = tab_bar_height(&self.tabs, self.active_tab_idx.unwrap_or(0), inner_width);
-        let rows = self.build_rows();
+        let rows = self.rendered_rows();
+        let measured_rows = self.measured_rows();
         let column_width = ColumnWidthConfig::new(self.col_width_mode, self.name_column_width);
         let rows_height = match self.row_display {
             SelectionRowDisplay::Wrapped => measure_rows_height_with_col_width_mode(
-                &rows,
+                &measured_rows,
                 &self.state,
                 MAX_POPUP_ROWS,
                 effective_rows_width.saturating_add(1),
@@ -1808,6 +1849,52 @@ mod tests {
             Ok(other) => panic!("expected OpenApprovalsPopup cancel event, got {other:?}"),
             Err(err) => panic!("expected cancel callback event, got {err}"),
         }
+    }
+
+    #[test]
+    fn selected_description_changes_do_not_change_desired_height() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![
+                    SelectionItem {
+                        name: "Local MCP".to_string(),
+                        description: Some(
+                            "stdio transport with an intentionally verbose status summary that wraps"
+                                .to_string(),
+                        ),
+                        selected_description: Some("Press Enter to manage this MCP server.".to_string()),
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Remote MCP".to_string(),
+                        description: Some("http".to_string()),
+                        selected_description: Some(
+                            "Press Enter to manage this MCP server and review a much longer selected-only explanation that wraps"
+                                .to_string(),
+                        ),
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                ],
+                col_width_mode: ColumnWidthMode::AutoAllRows,
+                ..Default::default()
+            },
+            tx,
+        );
+
+        let width = 46;
+        let initial_height = view.desired_height(width);
+
+        view.handle_key_event(KeyEvent::from(KeyCode::Down));
+        let second_height = view.desired_height(width);
+        view.handle_key_event(KeyEvent::from(KeyCode::Down));
+        let wrapped_height = view.desired_height(width);
+
+        assert_eq!(second_height, initial_height);
+        assert_eq!(wrapped_height, initial_height);
     }
 
     #[test]
