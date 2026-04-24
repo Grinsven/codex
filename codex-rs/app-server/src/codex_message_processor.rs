@@ -95,6 +95,7 @@ use codex_app_server_protocol::McpResourceReadResponse;
 use codex_app_server_protocol::McpServerOauthLoginCompletedNotification;
 use codex_app_server_protocol::McpServerOauthLoginParams;
 use codex_app_server_protocol::McpServerOauthLoginResponse;
+use codex_app_server_protocol::McpServerRefreshParams;
 use codex_app_server_protocol::McpServerRefreshResponse;
 use codex_app_server_protocol::McpServerStatus;
 use codex_app_server_protocol::McpServerStatusDetail;
@@ -5751,10 +5752,13 @@ impl CodexMessageProcessor {
             return Ok(());
         }
 
-        let default_refresh_config = self.serialize_mcp_server_refresh_config(config)?;
+        let default_refresh_config = self.serialize_mcp_server_refresh_config(config).await?;
         for thread in threads {
             let thread_cwd = thread.config_snapshot().await.cwd;
-            let thread_config = match self.load_latest_config(Some(thread_cwd.clone())).await {
+            let thread_config = match self
+                .load_latest_config(Some(thread_cwd.clone().to_path_buf()))
+                .await
+            {
                 Ok(config) => config,
                 Err(err) => {
                     if fallback_cwd.is_some() {
@@ -5771,7 +5775,8 @@ impl CodexMessageProcessor {
             let refresh_config = if thread_config.cwd == config.cwd {
                 default_refresh_config.clone()
             } else {
-                self.serialize_mcp_server_refresh_config(&thread_config)?
+                self.serialize_mcp_server_refresh_config(&thread_config)
+                    .await?
             };
             if let Err(err) = thread
                 .submit(Op::RefreshMcpServers {
@@ -5785,11 +5790,15 @@ impl CodexMessageProcessor {
         Ok(())
     }
 
-    fn serialize_mcp_server_refresh_config(
+    async fn serialize_mcp_server_refresh_config(
         &self,
         config: &Config,
     ) -> Result<McpServerRefreshConfig, JSONRPCErrorError> {
-        let configured_servers = self.thread_manager.mcp_manager().configured_servers(config);
+        let configured_servers = self
+            .thread_manager
+            .mcp_manager()
+            .configured_servers(config)
+            .await;
         let mcp_servers =
             serde_json::to_value(configured_servers).map_err(|err| JSONRPCErrorError {
                 code: INTERNAL_ERROR_CODE,

@@ -17,6 +17,13 @@
         "null"
       ]
     },
+    "cwd": {
+      "description": "Optional working directory used to resolve project-local config layers.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "detail": {
       "anyOf": [
         {

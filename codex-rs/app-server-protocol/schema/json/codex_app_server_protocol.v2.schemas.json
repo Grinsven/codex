@@ -2057,12 +2057,13 @@
               "type": "string"
             },
             "params": {
-              "type": "null"
+              "$ref": "#/definitions/McpServerRefreshParams"
             }
           },
           "required": [
             "id",
-            "method"
+            "method",
+            "params"
           ],
           "title": "Config/mcpServer/reloadRequest",
           "type": "object"
@@ -6600,6 +6601,13 @@
             "null"
           ]
         },
+        "cwd": {
+          "description": "Optional working directory used to resolve project-local config layers.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "detail": {
           "anyOf": [
             {
@@ -7242,6 +7250,20 @@
         "authorizationUrl"
       ],
       "title": "McpServerOauthLoginResponse",
+      "type": "object"
+    },
+    "McpServerRefreshParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cwd": {
+          "description": "Optional working directory used to resolve project-local config layers.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "title": "McpServerRefreshParams",
       "type": "object"
     },
     "McpServerRefreshResponse": {

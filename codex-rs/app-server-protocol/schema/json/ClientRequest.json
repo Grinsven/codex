@@ -1507,6 +1507,13 @@
             "null"
           ]
         },
+        "cwd": {
+          "description": "Optional working directory used to resolve project-local config layers.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "detail": {
           "anyOf": [
             {
@@ -1778,6 +1785,18 @@
       "required": [
         "name"
       ],
+      "type": "object"
+    },
+    "McpServerRefreshParams": {
+      "properties": {
+        "cwd": {
+          "description": "Optional working directory used to resolve project-local config layers.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "McpServerStatusDetail": {
@@ -5647,12 +5666,13 @@
           "type": "string"
         },
         "params": {
-          "type": "null"
+          "$ref": "#/definitions/McpServerRefreshParams"
         }
       },
       "required": [
         "id",
-        "method"
+        "method",
+        "params"
       ],
       "title": "Config/mcpServer/reloadRequest",
       "type": "object"

@@ -31,7 +31,6 @@ async fn resolve_project_config_dir(
     ))
 }
 
-
 impl App {
     pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
         let mut overrides = self.harness_overrides.clone();
@@ -108,22 +107,6 @@ impl App {
                 sync_runtime_permissions_from_legacy_sandbox_policy(config);
             }
         }
-    }
-
-
-    pub(super) async fn set_mcp_server_enabled(
-        &mut self,
-        app_server: &mut AppServerSession,
-        name: String,
-        enabled: bool,
-    ) {
-        self.set_mcp_server_enabled_with_scope(
-            app_server,
-            name,
-            enabled,
-            McpServerConfigScope::Global,
-        )
-        .await;
     }
 
     pub(super) async fn set_mcp_server_enabled_with_scope(
@@ -237,8 +220,10 @@ impl App {
             self.chat_widget
                 .add_error_message(format!("Failed to reconnect MCP servers for {name}: {err}"));
         } else {
-            self.chat_widget
-                .add_info_message(format!("Reconnected MCP servers for {name}"), /*hint*/ None);
+            self.chat_widget.add_info_message(
+                format!("Reconnected MCP servers for {name}"),
+                /*hint*/ None,
+            );
         }
     }
 
@@ -248,7 +233,7 @@ impl App {
         cwd: &Path,
     ) -> Result<PathBuf> {
         match scope {
-            McpServerConfigScope::Global => Ok(self.config.codex_home.clone()),
+            McpServerConfigScope::Global => Ok(self.config.codex_home.clone().to_path_buf()),
             McpServerConfigScope::Repo => {
                 let effective_config: ConfigToml = self
                     .config
@@ -257,15 +242,18 @@ impl App {
                     .try_into()
                     .map_err(|err| color_eyre::eyre::eyre!("invalid effective config: {err}"))?;
 
+                let project_root = resolve_project_config_dir(
+                    cwd,
+                    effective_config.project_root_markers.as_deref(),
+                )
+                .await?;
                 effective_config
-                    .get_active_project(cwd)
+                    .get_active_project(cwd, Some(project_root.as_path()))
                     .filter(|project| project.is_trusted())
                     .ok_or_else(|| {
                         color_eyre::eyre::eyre!("current cwd is not inside a trusted project")
                     })?;
-                resolve_project_config_dir(cwd, effective_config.project_root_markers.as_deref())
-                    .await
-                    .map(|path| path.join(".codex"))
+                Ok(project_root.join(".codex"))
             }
         }
     }
@@ -743,31 +731,31 @@ fn sync_runtime_permissions_from_legacy_sandbox_policy(config: &mut Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::app_event::McpServerConfigScope;
-use codex_config::config_toml::ConfigToml;
+    use crate::app_event::McpServerConfigScope;
+    use codex_config::config_toml::ConfigToml;
 
-async fn resolve_project_config_dir(
-    cwd: &Path,
-    project_root_markers: Option<&[String]>,
-) -> Result<PathBuf> {
-    let markers = project_root_markers
-        .filter(|markers| !markers.is_empty())
-        .map(|markers| markers.to_vec())
-        .unwrap_or_else(|| vec![".git".to_string()]);
+    async fn resolve_project_config_dir(
+        cwd: &Path,
+        project_root_markers: Option<&[String]>,
+    ) -> Result<PathBuf> {
+        let markers = project_root_markers
+            .filter(|markers| !markers.is_empty())
+            .map(|markers| markers.to_vec())
+            .unwrap_or_else(|| vec![".git".to_string()]);
 
-    for ancestor in cwd.ancestors() {
-        for marker in &markers {
-            if tokio::fs::metadata(ancestor.join(marker)).await.is_ok() {
-                return Ok(ancestor.to_path_buf());
+        for ancestor in cwd.ancestors() {
+            for marker in &markers {
+                if tokio::fs::metadata(ancestor.join(marker)).await.is_ok() {
+                    return Ok(ancestor.to_path_buf());
+                }
             }
         }
-    }
 
-    Err(color_eyre::eyre::eyre!(
-        "failed to locate a project root for {}",
-        cwd.display()
-    ))
-}
+        Err(color_eyre::eyre::eyre!(
+            "failed to locate a project root for {}",
+            cwd.display()
+        ))
+    }
 
     use crate::app::test_support::app_enabled_in_effective_config;
     use crate::app::test_support::make_test_app;

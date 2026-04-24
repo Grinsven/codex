@@ -412,9 +412,7 @@ pub(super) async fn fetch_all_mcp_server_statuses(
                 params: ListMcpServerStatusParams {
                     cursor: cursor.clone(),
                     limit: Some(100),
-                    cwd: cwd
-                        .as_ref()
-                        .map(|cwd| cwd.to_string_lossy().to_string()),
+                    cwd: cwd.as_ref().map(|cwd| cwd.to_string_lossy().to_string()),
                     detail: Some(detail),
                 },
             })

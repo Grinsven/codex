@@ -95,7 +95,7 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn sync_mcp_config(&mut self, config: &codex_core::config::Config) {
+    pub(crate) fn sync_mcp_config(&mut self, config: &crate::legacy_core::config::Config) {
         self.config.mcp_servers = config.mcp_servers.clone();
         self.config.mcp_oauth_credentials_store_mode = config.mcp_oauth_credentials_store_mode;
     }

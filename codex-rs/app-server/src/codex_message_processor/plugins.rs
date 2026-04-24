@@ -202,7 +202,7 @@ impl CodexMessageProcessor {
             marketplace_path.as_path().parent().map(Path::to_path_buf)
         });
 
-        let config = match self.load_latest_config(config_cwd).await {
+        let config = match self.load_latest_config(config_cwd.clone()).await {
             Ok(config) => config,
             Err(err) => {
                 self.outgoing.send_error(request_id, err).await;
@@ -389,7 +389,7 @@ impl CodexMessageProcessor {
 
         match install_result {
             Ok(result) => {
-                let config = match self.load_latest_config(config_cwd).await {
+                let config = match self.load_latest_config(config_cwd.clone()).await {
                     Ok(config) => config,
                     Err(err) => {
                         warn!(
@@ -405,7 +405,10 @@ impl CodexMessageProcessor {
                     load_plugin_mcp_servers(result.installed_path.as_path()).await;
 
                 if !plugin_mcp_servers.is_empty() {
-                    if let Err(err) = self.queue_mcp_server_refresh_for_config(&config).await {
+                    if let Err(err) = self
+                        .queue_mcp_server_refresh_for_config(&config, config_cwd.as_deref())
+                        .await
+                    {
                         warn!(
                             plugin = result.plugin_id.as_key(),
                             "failed to queue MCP refresh after plugin install: {err:?}"
