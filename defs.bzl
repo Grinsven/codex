@@ -13,6 +13,13 @@ PLATFORMS = [
     "windows_arm64",
 ]
 
+RELEASE_PLATFORM_TARGETS = {
+    "linux_arm64_musl": "//:release_linux_arm64_musl",
+    "linux_amd64_musl": "//:release_linux_amd64_musl",
+    "windows_arm64": "//:release_windows_arm64",
+    "windows_amd64": "//:release_windows_amd64",
+}
+
 # Match Cargo's Windows linker behavior so Bazel-built binaries and tests use
 # the same stack reserve on both Windows ABIs and resolve UCRT imports on MSVC.
 WINDOWS_RUSTC_LINK_FLAGS = select({
@@ -47,7 +54,7 @@ def multiplatform_binaries(name, platforms = PLATFORMS):
     for platform in platforms:
         platform_data(
             name = name + "_" + platform,
-            platform = "@llvm//platforms:" + platform,
+            platform = RELEASE_PLATFORM_TARGETS.get(platform, "@llvm//platforms:" + platform),
             target = name,
             tags = ["manual"],
         )
