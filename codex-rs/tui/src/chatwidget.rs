@@ -3202,7 +3202,6 @@ impl ChatWidget {
         status: McpStartupStatus,
         complete_when_settled: bool,
     ) {
-        let mut activated_pending_round = false;
         let startup_status = if self.mcp_startup_ignore_updates_until_next_start {
             // Ignore-mode buffers the next plausible round so stale post-finish
             // updates cannot immediately reopen startup. A fresh `Starting`
@@ -3240,26 +3239,15 @@ impl ChatWidget {
             self.mcp_startup_ignore_updates_until_next_start = false;
             self.mcp_startup_allow_terminal_only_next_round = false;
             self.mcp_startup_pending_next_round_saw_starting = false;
-            activated_pending_round = true;
             std::mem::take(&mut self.mcp_startup_pending_next_round)
         } else {
-            // Normal path: fold the update into the active round and surface
-            // per-server failures immediately.
+            // Normal path: fold the update into the active round. Startup
+            // failures are kept in the MCP manager/status inventory instead of
+            // being surfaced as warning history on every TUI launch.
             let mut startup_status = self.mcp_startup_status.take().unwrap_or_default();
-            if let McpStartupStatus::Failed { error } = &status {
-                self.on_warning(error);
-            }
             startup_status.insert(server, status);
             startup_status
         };
-        if activated_pending_round {
-            // A promoted buffered round may already contain terminal failures.
-            for state in startup_status.values() {
-                if let McpStartupStatus::Failed { error } = state {
-                    self.on_warning(error);
-                }
-            }
-        }
         self.mcp_startup_status = Some(startup_status);
         self.update_task_running_state();
 
@@ -3345,19 +3333,11 @@ impl ChatWidget {
     }
 
     fn finish_mcp_startup(&mut self, failed: Vec<String>, cancelled: Vec<String>) {
-        if !cancelled.is_empty() {
-            self.on_warning(format!(
-                "MCP startup interrupted. The following servers were not initialized: {}",
-                cancelled.join(", ")
-            ));
-        }
-        let mut parts = Vec::new();
-        if !failed.is_empty() {
-            parts.push(format!("failed: {}", failed.join(", ")));
-        }
-        if !parts.is_empty() {
-            self.on_warning(format!("MCP startup incomplete ({})", parts.join("; ")));
-        }
+        // MCP startup failures/cancellations are visible from `/mcp` and the MCP
+        // manager. Do not inject warning rows into the main transcript during
+        // startup; a broken optional server should not make every new session
+        // look like a user-visible error.
+        drop((failed, cancelled));
 
         self.mcp_startup_status = None;
         self.mcp_startup_ignore_updates_until_next_start = true;
