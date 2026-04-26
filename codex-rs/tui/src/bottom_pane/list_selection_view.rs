@@ -107,6 +107,10 @@ enum DescriptionVariant {
 
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
+pub(crate) struct SelectionShortcutAction {
+    pub binding: KeyBinding,
+    pub action: SelectionAction,
+}
 pub(crate) type SelectionToggleAction = dyn Fn(bool, &AppEventSender) + Send + Sync;
 
 pub(crate) struct SelectionToggle {
@@ -143,6 +147,7 @@ pub(crate) struct SelectionItem {
     pub is_default: bool,
     pub is_disabled: bool,
     pub actions: Vec<SelectionAction>,
+    pub shortcut_actions: Vec<SelectionShortcutAction>,
     pub dismiss_on_select: bool,
     pub dismiss_parent_on_child_accept: bool,
     pub search_value: Option<String>,
@@ -614,6 +619,28 @@ impl ListSelectionView {
         (toggle.action)(toggle.is_on, &app_event_tx);
     }
 
+    fn handle_selected_shortcut_action(&mut self, key_event: KeyEvent) -> bool {
+        let Some(actual_idx) = self.selected_actual_idx() else {
+            return false;
+        };
+        let Some(item) = self.active_items().get(actual_idx) else {
+            return false;
+        };
+        if item.is_disabled || item.disabled_reason.is_some() {
+            return false;
+        }
+        let Some(shortcut_action) = item
+            .shortcut_actions
+            .iter()
+            .find(|shortcut_action| shortcut_action.binding.is_press(key_event))
+        else {
+            return false;
+        };
+
+        (shortcut_action.action)(&self.app_event_tx);
+        true
+    }
+
     fn move_up(&mut self) {
         let before = self.selected_actual_idx();
         let len = self.visible_len();
@@ -858,6 +885,7 @@ impl BottomPaneView for ListSelectionView {
             } if self.is_searchable
                 && self.search_query.is_empty()
                 && self.selected_item_has_toggle_placeholder() => {}
+            key_event if self.handle_selected_shortcut_action(key_event) => {}
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
@@ -1700,6 +1728,34 @@ mod tests {
             rx.try_recv().is_err(),
             "expected Space with an active search query to avoid firing the toggle action"
         );
+    }
+
+    #[test]
+    fn searchable_selection_shortcut_runs_without_updating_search_query() {
+        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![SelectionItem {
+                    name: "Saved account".to_string(),
+                    shortcut_actions: vec![SelectionShortcutAction {
+                        binding: crate::key_hint::plain(KeyCode::Char('-')),
+                        action: Box::new(|tx: &_| {
+                            tx.send(AppEvent::OpenApprovalsPopup);
+                        }),
+                    }],
+                    ..Default::default()
+                }],
+                is_searchable: true,
+                ..Default::default()
+            },
+            tx,
+        );
+
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE));
+
+        assert_eq!(view.search_query, "");
+        assert!(matches!(rx.try_recv(), Ok(AppEvent::OpenApprovalsPopup)));
     }
 
     #[test]

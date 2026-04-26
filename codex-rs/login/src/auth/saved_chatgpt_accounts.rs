@@ -119,6 +119,43 @@ pub(crate) fn switch_active_chatgpt_account(
     Ok(())
 }
 
+pub(crate) fn delete_saved_chatgpt_account(
+    codex_home: &Path,
+    account_id: &str,
+    auth_credentials_store_mode: AuthCredentialsStoreMode,
+) -> std::io::Result<()> {
+    let mut saved_accounts =
+        sync_saved_chatgpt_accounts_with_active_auth(codex_home, auth_credentials_store_mode)?;
+
+    if let Some(active_auth) =
+        load_managed_chatgpt_auth_from_active_storage(codex_home, auth_credentials_store_mode)?
+        && saved_chatgpt_account_id(&active_auth).as_deref() == Some(account_id)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "cannot delete the current ChatGPT account; switch accounts or log out first",
+        ));
+    }
+
+    let Some(index) = saved_accounts
+        .accounts
+        .iter()
+        .position(|saved| saved_chatgpt_account_id(saved).as_deref() == Some(account_id))
+    else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("saved ChatGPT account not found: {account_id}"),
+        ));
+    };
+
+    saved_accounts.accounts.remove(index);
+    let storage = create_saved_chatgpt_accounts_storage(
+        codex_home.to_path_buf(),
+        auth_credentials_store_mode,
+    );
+    storage.save(&saved_accounts)
+}
+
 fn sync_saved_chatgpt_accounts_with_active_auth(
     codex_home: &Path,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
@@ -308,4 +345,117 @@ fn saved_chatgpt_account_id(auth: &AuthDotJson) -> Option<String> {
 
 fn is_managed_chatgpt_auth(auth: &AuthDotJson) -> bool {
     auth.resolved_mode() == ApiAuthMode::Chatgpt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token_data::IdTokenInfo;
+    use crate::token_data::TokenData;
+    use base64::Engine;
+    use serde::Serialize;
+    use tempfile::tempdir;
+
+    fn chatgpt_auth(account_id: &str, email: &str) -> AuthDotJson {
+        let raw_jwt = fake_jwt(account_id, email);
+        AuthDotJson {
+            auth_mode: Some(ApiAuthMode::Chatgpt),
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: IdTokenInfo {
+                    email: Some(email.to_string()),
+                    chatgpt_user_id: Some(format!("user-{account_id}")),
+                    raw_jwt,
+                    ..Default::default()
+                },
+                access_token: format!("access-{account_id}"),
+                refresh_token: format!("refresh-{account_id}"),
+                account_id: Some(account_id.to_string()),
+            }),
+            last_refresh: None,
+            agent_identity: None,
+        }
+    }
+
+    fn fake_jwt(account_id: &str, email: &str) -> String {
+        #[derive(Serialize)]
+        struct Header {
+            alg: &'static str,
+            typ: &'static str,
+        }
+
+        let header = Header {
+            alg: "none",
+            typ: "JWT",
+        };
+        let payload = serde_json::json!({
+            "email": email,
+            "email_verified": true,
+            "https://api.openai.com/auth": {
+                "chatgpt_user_id": format!("user-{account_id}"),
+                "user_id": format!("user-{account_id}"),
+            },
+        });
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let header_b64 = b64(&serde_json::to_vec(&header).expect("serialize header"));
+        let payload_b64 = b64(&serde_json::to_vec(&payload).expect("serialize payload"));
+        let signature_b64 = b64(b"sig");
+        format!("{header_b64}.{payload_b64}.{signature_b64}")
+    }
+
+    #[test]
+    fn delete_saved_chatgpt_account_removes_non_active_account() {
+        let dir = tempdir().expect("tempdir");
+        let active = chatgpt_auth("active", "active@example.com");
+        let target = chatgpt_auth("target", "target@example.com");
+        super::super::save_auth(dir.path(), &active, AuthCredentialsStoreMode::File)
+            .expect("save active auth");
+        create_saved_chatgpt_accounts_storage(
+            dir.path().to_path_buf(),
+            AuthCredentialsStoreMode::File,
+        )
+        .save(&SavedChatgptAccounts {
+            accounts: vec![active.clone(), target],
+        })
+        .expect("save saved accounts");
+
+        delete_saved_chatgpt_account(dir.path(), "account:target", AuthCredentialsStoreMode::File)
+            .expect("delete saved account");
+
+        let accounts = list_saved_chatgpt_accounts(
+            dir.path(),
+            /*runtime_active_auth*/ None,
+            AuthCredentialsStoreMode::File,
+        )
+        .expect("list accounts");
+        assert_eq!(
+            vec![SavedChatgptAccount {
+                id: "account:active".to_string(),
+                email: Some("active@example.com".to_string()),
+                account_id: Some("active".to_string()),
+                chatgpt_user_id: Some("user-active".to_string()),
+                chatgpt_workspace_id: None,
+                plan_type: None,
+                is_active: false,
+            }],
+            accounts
+        );
+    }
+
+    #[test]
+    fn delete_saved_chatgpt_account_rejects_active_account() {
+        let dir = tempdir().expect("tempdir");
+        let active = chatgpt_auth("active", "active@example.com");
+        super::super::save_auth(dir.path(), &active, AuthCredentialsStoreMode::File)
+            .expect("save active auth");
+
+        let err = delete_saved_chatgpt_account(
+            dir.path(),
+            "account:active",
+            AuthCredentialsStoreMode::File,
+        )
+        .expect_err("active account deletion should fail");
+
+        assert_eq!(std::io::ErrorKind::PermissionDenied, err.kind());
+    }
 }

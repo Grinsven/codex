@@ -118,6 +118,46 @@ impl ChatWidget {
         ));
     }
 
+    pub(crate) fn delete_saved_chatgpt_account(&mut self, account_id: String, label: String) {
+        if let Err(err) = self
+            .saved_chatgpt_auth_manager()
+            .delete_saved_chatgpt_account(&account_id)
+        {
+            self.add_error_message(format!("Failed to delete saved account {label}: {err}"));
+            return;
+        }
+
+        self.saved_chatgpt_account_rate_limit_pending_ids
+            .remove(&account_id);
+        self.saved_chatgpt_account_rate_limit_cache
+            .remove(&account_id);
+        if self
+            .saved_chatgpt_account_zero_limit_notice_account_id
+            .as_deref()
+            == Some(account_id.as_str())
+        {
+            self.saved_chatgpt_account_zero_limit_notice_account_id = None;
+        }
+
+        if let Ok(accounts) = self
+            .saved_chatgpt_auth_manager()
+            .list_saved_chatgpt_accounts()
+        {
+            let params = crate::account_picker::account_selection_params(
+                self.saved_chatgpt_account_picker_entries(accounts.as_slice()),
+                self.app_event_tx.clone(),
+            );
+            self.bottom_pane
+                .replace_selection_view_if_active(ACCOUNT_SELECTION_VIEW_ID, params);
+        }
+
+        self.add_info_message(
+            format!("Deleted saved ChatGPT account {label}."),
+            /*hint*/ None,
+        );
+        self.request_redraw();
+    }
+
     pub(crate) fn update_active_saved_chatgpt_account_limit_cache(
         &mut self,
         snapshot: &RateLimitSnapshotDisplay,

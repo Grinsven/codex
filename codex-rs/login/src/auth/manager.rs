@@ -1731,6 +1731,14 @@ impl AuthManager {
         Ok(())
     }
 
+    pub fn delete_saved_chatgpt_account(&self, account_id: &str) -> std::io::Result<()> {
+        crate::auth::saved_chatgpt_accounts::delete_saved_chatgpt_account(
+            &self.codex_home,
+            account_id,
+            self.auth_credentials_store_mode,
+        )
+    }
+
     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {
         let auth_dot_json = self
             .auth_cached()
