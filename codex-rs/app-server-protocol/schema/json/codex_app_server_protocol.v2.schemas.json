@@ -65,6 +65,55 @@
         }
       ]
     },
+    "AccountListParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "title": "AccountListParams",
+      "type": "object"
+    },
+    "AccountListResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "activeSavedAccountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "$ref": "#/definitions/SavedAccountSummary"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "title": "AccountListResponse",
+      "type": "object"
+    },
     "AccountLoginCompletedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -103,9 +152,57 @@
       "title": "AccountRateLimitsUpdatedNotification",
       "type": "object"
     },
+    "AccountSwitchParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "savedAccountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "savedAccountId"
+      ],
+      "title": "AccountSwitchParams",
+      "type": "object"
+    },
+    "AccountSwitchResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Account"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activeSavedAccountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requiresOpenaiAuth": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requiresOpenaiAuth"
+      ],
+      "title": "AccountSwitchResponse",
+      "type": "object"
+    },
     "AccountUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "activeSavedAccountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "authMode": {
           "anyOf": [
             {
@@ -2571,6 +2668,54 @@
             "params"
           ],
           "title": "Account/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/list"
+              ],
+              "title": "Account/listRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountListParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/listRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/switch"
+              ],
+              "title": "Account/switchRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountSwitchParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/switchRequest",
           "type": "object"
         },
         {
@@ -5817,6 +5962,12 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "activeSavedAccountId": {
+          "type": [
+            "string",
+            "null"
           ]
         },
         "requiresOpenaiAuth": {
@@ -10340,6 +10491,21 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "SavedAccountSummary": {
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/Account"
+        },
+        "savedAccountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "account",
+        "savedAccountId"
+      ],
       "type": "object"
     },
     "SendAddCreditsNudgeEmailParams": {

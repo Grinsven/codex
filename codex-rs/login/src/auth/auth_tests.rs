@@ -35,6 +35,8 @@ async fn refresh_without_id_token() {
         AuthCredentialsStoreMode::File,
     );
     let updated = super::persist_tokens(
+        codex_home.path(),
+        AuthCredentialsStoreMode::File,
         &storage,
         /*id_token*/ None,
         Some("new-access-token".to_string()),

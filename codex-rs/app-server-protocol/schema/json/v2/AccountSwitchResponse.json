@@ -103,6 +103,6 @@
   "required": [
     "requiresOpenaiAuth"
   ],
-  "title": "GetAccountResponse",
+  "title": "AccountSwitchResponse",
   "type": "object"
 }

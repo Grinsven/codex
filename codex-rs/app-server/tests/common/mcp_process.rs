@@ -11,6 +11,7 @@ use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 
 use anyhow::Context;
+use codex_app_server_protocol::AccountSwitchParams;
 use codex_app_server_protocol::AppsListParams;
 use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::ClientInfo;
@@ -325,6 +326,15 @@ impl McpProcess {
     ) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("account/read", params).await
+    }
+
+    /// Send an `account/switch` JSON-RPC request.
+    pub async fn send_account_switch_request(
+        &mut self,
+        params: AccountSwitchParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("account/switch", params).await
     }
 
     /// Send an `account/login/start` JSON-RPC request with ChatGPT auth tokens.

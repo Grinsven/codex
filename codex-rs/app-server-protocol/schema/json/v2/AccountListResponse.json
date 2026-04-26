@@ -77,32 +77,46 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "SavedAccountSummary": {
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/Account"
+        },
+        "savedAccountId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "account",
+        "savedAccountId"
+      ],
+      "type": "object"
     }
   },
   "properties": {
-    "account": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Account"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "activeSavedAccountId": {
       "type": [
         "string",
         "null"
       ]
     },
-    "requiresOpenaiAuth": {
-      "type": "boolean"
+    "data": {
+      "items": {
+        "$ref": "#/definitions/SavedAccountSummary"
+      },
+      "type": "array"
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
-    "requiresOpenaiAuth"
+    "data"
   ],
-  "title": "GetAccountResponse",
+  "title": "AccountListResponse",
   "type": "object"
 }

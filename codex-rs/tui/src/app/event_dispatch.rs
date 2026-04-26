@@ -1377,6 +1377,22 @@ impl App {
                 self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
                     .await?;
             }
+            AppEvent::SwitchSavedChatgptAccount { account_id, label } => {
+                match app_server.account_switch(account_id).await {
+                    Ok(_) => self
+                        .chat_widget
+                        .refresh_auth_state_after_account_switch(label),
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to switch account to {label}: {err}"
+                        ));
+                    }
+                }
+            }
+            AppEvent::SavedChatgptAccountRateLimitsLoaded { updates } => {
+                self.chat_widget
+                    .on_saved_chatgpt_account_rate_limits_loaded(updates);
+            }
             AppEvent::StartSide {
                 parent_thread_id,
                 user_message,

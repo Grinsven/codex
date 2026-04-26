@@ -615,6 +615,15 @@ client_request_definitions! {
         response: v2::GetAccountResponse,
     },
 
+    AccountList => "account/list" {
+        params: v2::AccountListParams,
+        response: v2::AccountListResponse,
+    },
+    AccountSwitch => "account/switch" {
+        params: v2::AccountSwitchParams,
+        response: v2::AccountSwitchResponse,
+    },
+
     /// DEPRECATED APIs below
     GetConversationSummary {
         params: v1::GetConversationSummaryParams,

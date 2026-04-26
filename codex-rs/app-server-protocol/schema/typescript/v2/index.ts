@@ -1,8 +1,12 @@
 // GENERATED CODE! DO NOT MODIFY BY HAND!
 
 export type { Account } from "./Account";
+export type { AccountListParams } from "./AccountListParams";
+export type { AccountListResponse } from "./AccountListResponse";
 export type { AccountLoginCompletedNotification } from "./AccountLoginCompletedNotification";
 export type { AccountRateLimitsUpdatedNotification } from "./AccountRateLimitsUpdatedNotification";
+export type { AccountSwitchParams } from "./AccountSwitchParams";
+export type { AccountSwitchResponse } from "./AccountSwitchResponse";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
 export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";
@@ -293,6 +297,7 @@ export type { ReviewTarget } from "./ReviewTarget";
 export type { SandboxMode } from "./SandboxMode";
 export type { SandboxPolicy } from "./SandboxPolicy";
 export type { SandboxWorkspaceWrite } from "./SandboxWorkspaceWrite";
+export type { SavedAccountSummary } from "./SavedAccountSummary";
 export type { SendAddCreditsNudgeEmailParams } from "./SendAddCreditsNudgeEmailParams";
 export type { SendAddCreditsNudgeEmailResponse } from "./SendAddCreditsNudgeEmailResponse";
 export type { ServerRequestResolvedNotification } from "./ServerRequestResolvedNotification";

@@ -1314,6 +1314,21 @@ class GetAccountParams(BaseModel):
     ] = False
 
 
+class AccountListParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str | None = None
+    limit: int | None = None
+
+
+class AccountSwitchParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    saved_account_id: Annotated[str, Field(alias="savedAccountId")]
+
+
 class GhostCommit(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4315,6 +4330,9 @@ class AccountUpdatedNotification(BaseModel):
     )
     auth_mode: Annotated[AuthMode | None, Field(alias="authMode")] = None
     plan_type: Annotated[PlanType | None, Field(alias="planType")] = None
+    active_saved_account_id: Annotated[
+        str | None, Field(alias="activeSavedAccountId")
+    ] = None
 
 
 class AppConfig(BaseModel):
@@ -4941,6 +4959,26 @@ class AccountReadRequest(BaseModel):
     params: GetAccountParams
 
 
+class AccountListRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["account/list"], Field(title="Account/listRequestMethod")]
+    params: AccountListParams
+
+
+class AccountSwitchRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/switch"], Field(title="Account/switchRequestMethod")
+    ]
+    params: AccountSwitchParams
+
+
 class FuzzyFileSearchRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5396,6 +5434,39 @@ class GetAccountResponse(BaseModel):
     )
     account: Account | None = None
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
+    active_saved_account_id: Annotated[
+        str | None, Field(alias="activeSavedAccountId")
+    ] = None
+
+
+class SavedAccountSummary(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    saved_account_id: Annotated[str, Field(alias="savedAccountId")]
+    account: Account
+
+
+class AccountListResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[SavedAccountSummary]
+    next_cursor: Annotated[str | None, Field(alias="nextCursor")] = None
+    active_saved_account_id: Annotated[
+        str | None, Field(alias="activeSavedAccountId")
+    ] = None
+
+
+class AccountSwitchResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: Account | None = None
+    requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
+    active_saved_account_id: Annotated[
+        str | None, Field(alias="activeSavedAccountId")
+    ] = None
 
 
 class GuardianApprovalReview(BaseModel):
@@ -7549,6 +7620,8 @@ class ClientRequest(
         | ConfigBatchWriteRequest
         | ConfigRequirementsReadRequest
         | AccountReadRequest
+        | AccountListRequest
+        | AccountSwitchRequest
         | FuzzyFileSearchRequest
     ]
 ):
@@ -7621,6 +7694,8 @@ class ClientRequest(
         | ConfigBatchWriteRequest
         | ConfigRequirementsReadRequest
         | AccountReadRequest
+        | AccountListRequest
+        | AccountSwitchRequest
         | FuzzyFileSearchRequest,
         Field(
             description="Request from the client to the server.", title="ClientRequest"

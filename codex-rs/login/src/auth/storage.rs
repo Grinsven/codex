@@ -56,8 +56,19 @@ pub struct AgentIdentityAuthRecord {
     pub chatgpt_account_is_fedramp: bool,
 }
 
+/// Expected structure for persisted managed ChatGPT account registry data.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub(crate) struct SavedChatgptAccounts {
+    #[serde(default)]
+    pub accounts: Vec<AuthDotJson>,
+}
+
 pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
     codex_home.join("auth.json")
+}
+
+pub(super) fn get_saved_chatgpt_accounts_file(codex_home: &Path) -> PathBuf {
+    codex_home.join("chatgpt-accounts.json")
 }
 
 pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> {
@@ -69,10 +80,24 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
     }
 }
 
+fn delete_saved_chatgpt_accounts_file_if_exists(codex_home: &Path) -> std::io::Result<bool> {
+    let accounts_file = get_saved_chatgpt_accounts_file(codex_home);
+    match std::fs::remove_file(&accounts_file) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
     fn delete(&self) -> std::io::Result<bool>;
+}
+
+pub(crate) trait SavedChatgptAccountsStorageBackend: Debug + Send + Sync {
+    fn load(&self) -> std::io::Result<Option<SavedChatgptAccounts>>;
+    fn save(&self, accounts: &SavedChatgptAccounts) -> std::io::Result<()>;
 }
 
 #[derive(Clone, Debug)]
@@ -132,10 +157,71 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct FileSavedChatgptAccountsStorage {
+    codex_home: PathBuf,
+}
+
+impl FileSavedChatgptAccountsStorage {
+    pub(super) fn new(codex_home: PathBuf) -> Self {
+        Self { codex_home }
+    }
+
+    fn try_read_saved_chatgpt_accounts(
+        &self,
+        accounts_file: &Path,
+    ) -> std::io::Result<SavedChatgptAccounts> {
+        let mut file = File::open(accounts_file)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let accounts: SavedChatgptAccounts = serde_json::from_str(&contents)?;
+        Ok(accounts)
+    }
+}
+
+impl SavedChatgptAccountsStorageBackend for FileSavedChatgptAccountsStorage {
+    fn load(&self) -> std::io::Result<Option<SavedChatgptAccounts>> {
+        let accounts_file = get_saved_chatgpt_accounts_file(&self.codex_home);
+        let accounts = match self.try_read_saved_chatgpt_accounts(&accounts_file) {
+            Ok(accounts) => accounts,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        Ok(Some(accounts))
+    }
+
+    fn save(&self, accounts: &SavedChatgptAccounts) -> std::io::Result<()> {
+        let accounts_file = get_saved_chatgpt_accounts_file(&self.codex_home);
+
+        if let Some(parent) = accounts_file.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json_data = serde_json::to_string_pretty(accounts)?;
+        let mut options = OpenOptions::new();
+        options.truncate(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+        }
+        let mut file = options.open(accounts_file)?;
+        file.write_all(json_data.as_bytes())?;
+        file.flush()?;
+        Ok(())
+    }
+}
+
 const KEYRING_SERVICE: &str = "Codex Auth";
 
 // turns codex_home path into a stable, short key string
 fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
+    compute_scoped_store_key(codex_home, "cli")
+}
+
+fn compute_saved_chatgpt_accounts_store_key(codex_home: &Path) -> std::io::Result<String> {
+    compute_scoped_store_key(codex_home, "cli|chatgpt-accounts")
+}
+
+fn compute_scoped_store_key(codex_home: &Path, prefix: &str) -> std::io::Result<String> {
     let canonical = codex_home
         .canonicalize()
         .unwrap_or_else(|_| codex_home.to_path_buf());
@@ -145,7 +231,7 @@ fn compute_store_key(codex_home: &Path) -> std::io::Result<String> {
     let digest = hasher.finalize();
     let hex = format!("{digest:x}");
     let truncated = hex.get(..16).unwrap_or(&hex);
-    Ok(format!("cli|{truncated}"))
+    Ok(format!("{prefix}|{truncated}"))
 }
 
 #[derive(Clone, Debug)]
@@ -223,6 +309,67 @@ impl AuthStorageBackend for KeyringAuthStorage {
 }
 
 #[derive(Clone, Debug)]
+pub(super) struct KeyringSavedChatgptAccountsStorage {
+    codex_home: PathBuf,
+    keyring_store: Arc<dyn KeyringStore>,
+}
+
+impl KeyringSavedChatgptAccountsStorage {
+    pub(super) fn new(codex_home: PathBuf, keyring_store: Arc<dyn KeyringStore>) -> Self {
+        Self {
+            codex_home,
+            keyring_store,
+        }
+    }
+
+    fn load_from_keyring(&self, key: &str) -> std::io::Result<Option<SavedChatgptAccounts>> {
+        match self.keyring_store.load(KEYRING_SERVICE, key) {
+            Ok(Some(serialized)) => serde_json::from_str(&serialized).map(Some).map_err(|err| {
+                std::io::Error::other(format!(
+                    "failed to deserialize saved ChatGPT accounts from keyring: {err}"
+                ))
+            }),
+            Ok(None) => Ok(None),
+            Err(error) => Err(std::io::Error::other(format!(
+                "failed to load saved ChatGPT accounts from keyring: {}",
+                error.message()
+            ))),
+        }
+    }
+
+    fn save_to_keyring(&self, key: &str, value: &str) -> std::io::Result<()> {
+        match self.keyring_store.save(KEYRING_SERVICE, key, value) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let message = format!(
+                    "failed to write saved ChatGPT accounts to keyring: {}",
+                    error.message()
+                );
+                warn!("{message}");
+                Err(std::io::Error::other(message))
+            }
+        }
+    }
+}
+
+impl SavedChatgptAccountsStorageBackend for KeyringSavedChatgptAccountsStorage {
+    fn load(&self) -> std::io::Result<Option<SavedChatgptAccounts>> {
+        let key = compute_saved_chatgpt_accounts_store_key(&self.codex_home)?;
+        self.load_from_keyring(&key)
+    }
+
+    fn save(&self, accounts: &SavedChatgptAccounts) -> std::io::Result<()> {
+        let key = compute_saved_chatgpt_accounts_store_key(&self.codex_home)?;
+        let serialized = serde_json::to_string(accounts).map_err(std::io::Error::other)?;
+        self.save_to_keyring(&key, &serialized)?;
+        if let Err(err) = delete_saved_chatgpt_accounts_file_if_exists(&self.codex_home) {
+            warn!("failed to remove saved ChatGPT accounts fallback file: {err}");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
 struct AutoAuthStorage {
     keyring_storage: Arc<KeyringAuthStorage>,
     file_storage: Arc<FileAuthStorage>,
@@ -265,8 +412,56 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct AutoSavedChatgptAccountsStorage {
+    keyring_storage: Arc<KeyringSavedChatgptAccountsStorage>,
+    file_storage: Arc<FileSavedChatgptAccountsStorage>,
+}
+
+impl AutoSavedChatgptAccountsStorage {
+    pub(super) fn new(codex_home: PathBuf, keyring_store: Arc<dyn KeyringStore>) -> Self {
+        Self {
+            keyring_storage: Arc::new(KeyringSavedChatgptAccountsStorage::new(
+                codex_home.clone(),
+                keyring_store,
+            )),
+            file_storage: Arc::new(FileSavedChatgptAccountsStorage::new(codex_home)),
+        }
+    }
+}
+
+impl SavedChatgptAccountsStorageBackend for AutoSavedChatgptAccountsStorage {
+    fn load(&self) -> std::io::Result<Option<SavedChatgptAccounts>> {
+        match self.keyring_storage.load() {
+            Ok(Some(accounts)) => Ok(Some(accounts)),
+            Ok(None) => self.file_storage.load(),
+            Err(err) => {
+                warn!(
+                    "failed to load saved ChatGPT accounts from keyring, falling back to file storage: {err}"
+                );
+                self.file_storage.load()
+            }
+        }
+    }
+
+    fn save(&self, accounts: &SavedChatgptAccounts) -> std::io::Result<()> {
+        match self.keyring_storage.save(accounts) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                warn!(
+                    "failed to save saved ChatGPT accounts to keyring, falling back to file storage: {err}"
+                );
+                self.file_storage.save(accounts)
+            }
+        }
+    }
+}
+
 // A global in-memory store for mapping codex_home -> AuthDotJson.
 static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+static EPHEMERAL_SAVED_CHATGPT_ACCOUNTS_STORE: Lazy<Mutex<HashMap<String, SavedChatgptAccounts>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Debug)]
@@ -308,7 +503,7 @@ impl AuthStorageBackend for EphemeralAuthStorage {
     }
 }
 
-pub(super) fn create_auth_storage(
+pub(crate) fn create_auth_storage(
     codex_home: PathBuf,
     mode: AuthCredentialsStoreMode,
 ) -> Arc<dyn AuthStorageBackend> {
@@ -328,6 +523,72 @@ fn create_auth_storage_with_keyring_store(
         }
         AuthCredentialsStoreMode::Auto => Arc::new(AutoAuthStorage::new(codex_home, keyring_store)),
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct EphemeralSavedChatgptAccountsStorage {
+    codex_home: PathBuf,
+}
+
+impl EphemeralSavedChatgptAccountsStorage {
+    pub(super) fn new(codex_home: PathBuf) -> Self {
+        Self { codex_home }
+    }
+
+    fn with_store<F, T>(&self, action: F) -> std::io::Result<T>
+    where
+        F: FnOnce(&mut HashMap<String, SavedChatgptAccounts>, String) -> std::io::Result<T>,
+    {
+        let key = compute_saved_chatgpt_accounts_store_key(&self.codex_home)?;
+        let mut store = EPHEMERAL_SAVED_CHATGPT_ACCOUNTS_STORE
+            .lock()
+            .map_err(|_| std::io::Error::other("failed to lock saved ChatGPT accounts storage"))?;
+        action(&mut store, key)
+    }
+}
+
+impl SavedChatgptAccountsStorageBackend for EphemeralSavedChatgptAccountsStorage {
+    fn load(&self) -> std::io::Result<Option<SavedChatgptAccounts>> {
+        self.with_store(|store, key| Ok(store.get(&key).cloned()))
+    }
+
+    fn save(&self, accounts: &SavedChatgptAccounts) -> std::io::Result<()> {
+        self.with_store(|store, key| {
+            store.insert(key, accounts.clone());
+            Ok(())
+        })
+    }
+}
+
+pub(crate) fn create_saved_chatgpt_accounts_storage(
+    codex_home: PathBuf,
+    mode: AuthCredentialsStoreMode,
+) -> Arc<dyn SavedChatgptAccountsStorageBackend> {
+    let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+    create_saved_chatgpt_accounts_storage_with_keyring_store(codex_home, mode, keyring_store)
+}
+
+fn create_saved_chatgpt_accounts_storage_with_keyring_store(
+    codex_home: PathBuf,
+    mode: AuthCredentialsStoreMode,
+    keyring_store: Arc<dyn KeyringStore>,
+) -> Arc<dyn SavedChatgptAccountsStorageBackend> {
+    match mode {
+        AuthCredentialsStoreMode::File => {
+            Arc::new(FileSavedChatgptAccountsStorage::new(codex_home))
+        }
+        AuthCredentialsStoreMode::Keyring => Arc::new(KeyringSavedChatgptAccountsStorage::new(
+            codex_home,
+            keyring_store,
+        )),
+        AuthCredentialsStoreMode::Auto => Arc::new(AutoSavedChatgptAccountsStorage::new(
+            codex_home,
+            keyring_store,
+        )),
+        AuthCredentialsStoreMode::Ephemeral => {
+            Arc::new(EphemeralSavedChatgptAccountsStorage::new(codex_home))
+        }
     }
 }
 

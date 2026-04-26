@@ -53,6 +53,12 @@
     }
   },
   "properties": {
+    "activeSavedAccountId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "authMode": {
       "anyOf": [
         {

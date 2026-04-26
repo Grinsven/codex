@@ -9,6 +9,7 @@ use app_test_support::encode_id_token;
 use app_test_support::write_chatgpt_auth;
 use app_test_support::write_models_cache;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AccountSwitchParams;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::CancelLoginAccountResponse;
@@ -295,6 +296,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
                 plan_type: AccountPlanType::Pro,
             }),
             requires_openai_auth: true,
+            active_saved_account_id: None,
         }
     );
 
@@ -362,6 +364,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
                 plan_type: AccountPlanType::Pro,
             }),
             requires_openai_auth: true,
+            active_saved_account_id: None,
         }
     );
 
@@ -982,6 +985,87 @@ async fn login_account_chatgpt_rejected_when_forced_api() -> Result<()> {
 }
 
 #[tokio::test]
+async fn account_switch_rejected_when_forced_api() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            forced_method: Some("api".to_string()),
+            ..Default::default()
+        },
+    )?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-chatgpt")
+            .account_id("acct-1")
+            .email("user@example.com")
+            .plan_type("pro"),
+        AuthCredentialsStoreMode::File,
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_account_switch_request(AccountSwitchParams {
+            saved_account_id: "account:acct-1".to_string(),
+        })
+        .await?;
+    let err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        err.error.message,
+        "ChatGPT account switching is disabled. Use API key login instead."
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_switch_rejected_when_forced_workspace_mismatches() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            forced_workspace_id: Some("ws-allowed".to_string()),
+            ..Default::default()
+        },
+    )?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-chatgpt")
+            .account_id("acct-other")
+            .chatgpt_account_id("ws-other")
+            .email("user@example.com")
+            .plan_type("pro"),
+        AuthCredentialsStoreMode::File,
+    )?;
+
+    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_account_switch_request(AccountSwitchParams {
+            saved_account_id: "account:acct-other".to_string(),
+        })
+        .await?;
+    let err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        err.error.message,
+        "ChatGPT account switching is restricted to workspace ws-allowed."
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let mock_server = MockServer::start().await;
@@ -1519,6 +1603,7 @@ async fn get_account_with_api_key() -> Result<()> {
     let expected = GetAccountResponse {
         account: Some(Account::ApiKey {}),
         requires_openai_auth: true,
+        active_saved_account_id: None,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1553,6 +1638,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     let expected = GetAccountResponse {
         account: None,
         requires_openai_auth: false,
+        active_saved_account_id: None,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1594,6 +1680,7 @@ region = "us-west-2"
     let expected = GetAccountResponse {
         account: Some(Account::AmazonBedrock {}),
         requires_openai_auth: false,
+        active_saved_account_id: None,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1638,6 +1725,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
             plan_type: AccountPlanType::Pro,
         }),
         requires_openai_auth: true,
+        active_saved_account_id: None,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -1680,6 +1768,7 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
             plan_type: AccountPlanType::Unknown,
         }),
         requires_openai_auth: true,
+        active_saved_account_id: None,
     };
     assert_eq!(received, expected);
     Ok(())

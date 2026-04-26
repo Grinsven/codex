@@ -193,7 +193,7 @@ impl From<RefreshTokenError> for std::io::Error {
 }
 
 impl CodexAuth {
-    fn from_auth_dot_json(
+    pub(crate) fn from_auth_dot_json(
         codex_home: &Path,
         auth_dot_json: AuthDotJson,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
@@ -403,7 +403,7 @@ impl CodexAuth {
     }
 
     /// Returns `None` if token-backed ChatGPT auth is unavailable.
-    fn get_current_auth_json(&self) -> Option<AuthDotJson> {
+    pub(crate) fn get_current_auth_json(&self) -> Option<AuthDotJson> {
         let state = match self {
             Self::Chatgpt(auth) => &auth.state,
             Self::ChatgptAuthTokens(auth) => &auth.state,
@@ -549,13 +549,20 @@ pub fn login_with_chatgpt_auth_tokens(
 }
 
 /// Persist the provided auth payload using the specified backend.
+///
+/// Managed ChatGPT auth is also upserted into the saved account registry.
 pub fn save_auth(
     codex_home: &Path,
     auth: &AuthDotJson,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
 ) -> std::io::Result<()> {
     let storage = create_auth_storage(codex_home.to_path_buf(), auth_credentials_store_mode);
-    storage.save(auth)
+    storage.save(auth)?;
+    crate::auth::saved_chatgpt_accounts::upsert_saved_chatgpt_account(
+        codex_home,
+        auth,
+        auth_credentials_store_mode,
+    )
 }
 
 /// Load CLI auth data using the configured credential store backend.
@@ -727,6 +734,8 @@ fn load_auth(
 
 // Persist refreshed tokens into auth storage and update last_refresh.
 fn persist_tokens(
+    codex_home: &Path,
+    auth_credentials_store_mode: AuthCredentialsStoreMode,
     storage: &Arc<dyn AuthStorageBackend>,
     id_token: Option<String>,
     access_token: Option<String>,
@@ -748,6 +757,11 @@ fn persist_tokens(
     }
     auth_dot_json.last_refresh = Some(Utc::now());
     storage.save(&auth_dot_json)?;
+    crate::auth::saved_chatgpt_accounts::upsert_saved_chatgpt_account(
+        codex_home,
+        &auth_dot_json,
+        auth_credentials_store_mode,
+    )?;
     Ok(auth_dot_json)
 }
 
@@ -918,7 +932,7 @@ impl AuthDotJson {
         Self::from_external_tokens(&external)
     }
 
-    fn resolved_mode(&self) -> ApiAuthMode {
+    pub(crate) fn resolved_mode(&self) -> ApiAuthMode {
         if let Some(mode) = self.auth_mode {
             return mode;
         }
@@ -1687,6 +1701,36 @@ impl AuthManager {
         Ok(removed)
     }
 
+    pub fn list_saved_chatgpt_accounts(
+        &self,
+    ) -> std::io::Result<Vec<crate::auth::SavedChatgptAccount>> {
+        crate::auth::saved_chatgpt_accounts::list_saved_chatgpt_accounts(
+            &self.codex_home,
+            self.auth_cached().as_ref(),
+            self.auth_credentials_store_mode,
+        )
+    }
+
+    pub fn list_saved_chatgpt_account_auths(
+        &self,
+    ) -> std::io::Result<Vec<crate::auth::SavedChatgptAccountAuth>> {
+        crate::auth::saved_chatgpt_accounts::list_saved_chatgpt_account_auths(
+            &self.codex_home,
+            self.auth_cached().as_ref(),
+            self.auth_credentials_store_mode,
+        )
+    }
+
+    pub fn switch_active_chatgpt_account(&self, account_id: &str) -> std::io::Result<()> {
+        crate::auth::saved_chatgpt_accounts::switch_active_chatgpt_account(
+            &self.codex_home,
+            account_id,
+            self.auth_credentials_store_mode,
+        )?;
+        self.reload();
+        Ok(())
+    }
+
     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {
         let auth_dot_json = self
             .auth_cached()
@@ -1806,6 +1850,8 @@ impl AuthManager {
         let refresh_response = request_chatgpt_token_refresh(refresh_token, auth.client()).await?;
 
         persist_tokens(
+            &self.codex_home,
+            self.auth_credentials_store_mode,
             auth.storage(),
             refresh_response.id_token,
             refresh_response.access_token,

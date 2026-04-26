@@ -114,6 +114,17 @@ pub(crate) enum AppEvent {
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
 
+    /// Switch the active ChatGPT account to a saved account.
+    SwitchSavedChatgptAccount {
+        account_id: String,
+        label: String,
+    },
+
+    /// Loaded saved ChatGPT account picker rate-limit cache updates.
+    SavedChatgptAccountRateLimitsLoaded {
+        updates: Vec<crate::account_picker::SavedChatgptAccountRateLimitCacheUpdate>,
+    },
+
     /// Fork the current thread into a transient side conversation.
     StartSide {
         parent_thread_id: ThreadId,

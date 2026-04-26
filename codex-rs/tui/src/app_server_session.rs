@@ -10,6 +10,8 @@ use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AccountSwitchParams;
+use codex_app_server_protocol::AccountSwitchResponse;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigBatchWriteParams;
@@ -680,6 +682,20 @@ impl AppServerSession {
             .await
             .wrap_err("account/logout failed in TUI")?;
         Ok(())
+    }
+
+    pub(crate) async fn account_switch(
+        &mut self,
+        saved_account_id: String,
+    ) -> Result<AccountSwitchResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AccountSwitch {
+                request_id,
+                params: AccountSwitchParams { saved_account_id },
+            })
+            .await
+            .wrap_err("account/switch failed in app-server TUI")
     }
 
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {

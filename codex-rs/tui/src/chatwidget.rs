@@ -368,6 +368,7 @@ use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
+mod accounts;
 mod interrupts;
 use self::interrupts::InterruptManager;
 mod session_header;
@@ -884,6 +885,13 @@ pub(crate) struct ChatWidget {
     connectors_partial_snapshot: Option<ConnectorsSnapshot>,
     connectors_prefetch_in_flight: bool,
     connectors_force_refetch_pending: bool,
+    /// Cached rate-limit summary for each saved ChatGPT account, keyed by id.
+    saved_chatgpt_account_rate_limit_cache:
+        HashMap<String, crate::account_picker::SavedChatgptAccountRateLimitCacheEntry>,
+    /// Account ids whose rate-limit refresh is currently in flight.
+    saved_chatgpt_account_rate_limit_pending_ids: HashSet<String>,
+    /// Active account id for which a "no headroom" notice has already been shown.
+    saved_chatgpt_account_zero_limit_notice_account_id: Option<String>,
     plugins_cache: PluginsCacheState,
     plugins_fetch_state: PluginListFetchState,
     plugin_install_apps_needing_auth: Vec<AppSummary>,
@@ -3009,8 +3017,14 @@ impl ChatWidget {
 
             let display =
                 rate_limit_snapshot_display_for_limit(&snapshot, limit_label, Local::now());
+            if is_codex_limit {
+                self.update_active_saved_chatgpt_account_limit_cache(&display);
+            }
             self.rate_limit_snapshots_by_limit_id
                 .insert(limit_id, display);
+            if is_codex_limit {
+                self.maybe_auto_switch_saved_chatgpt_account();
+            }
 
             if !warnings.is_empty() {
                 for warning in warnings {
@@ -5224,6 +5238,9 @@ impl ChatWidget {
             connectors_partial_snapshot: None,
             connectors_prefetch_in_flight: false,
             connectors_force_refetch_pending: false,
+            saved_chatgpt_account_rate_limit_cache: HashMap::new(),
+            saved_chatgpt_account_rate_limit_pending_ids: HashSet::new(),
+            saved_chatgpt_account_zero_limit_notice_account_id: None,
             plugins_cache: PluginsCacheState::default(),
             plugins_fetch_state: PluginListFetchState::default(),
             plugin_install_apps_needing_auth: Vec::new(),

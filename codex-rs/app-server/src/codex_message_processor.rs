@@ -27,7 +27,11 @@ use codex_analytics::AnalyticsJsonRpcError;
 use codex_analytics::InputError;
 use codex_analytics::TurnSteerRequestError;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AccountListParams;
+use codex_app_server_protocol::AccountListResponse;
 use codex_app_server_protocol::AccountLoginCompletedNotification;
+use codex_app_server_protocol::AccountSwitchParams;
+use codex_app_server_protocol::AccountSwitchResponse;
 use codex_app_server_protocol::AccountUpdatedNotification;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
@@ -126,6 +130,7 @@ use codex_app_server_protocol::ReviewStartParams;
 use codex_app_server_protocol::ReviewStartResponse;
 use codex_app_server_protocol::ReviewTarget as ApiReviewTarget;
 use codex_app_server_protocol::SandboxMode;
+use codex_app_server_protocol::SavedAccountSummary;
 use codex_app_server_protocol::SendAddCreditsNudgeEmailParams;
 use codex_app_server_protocol::SendAddCreditsNudgeEmailResponse;
 use codex_app_server_protocol::ServerNotification;
@@ -695,6 +700,47 @@ impl CodexMessageProcessor {
         AccountUpdatedNotification {
             auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
             plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            active_saved_account_id: self.current_active_saved_account_id(),
+        }
+    }
+
+    fn current_active_saved_account_id(&self) -> Option<String> {
+        match self.auth_manager.list_saved_chatgpt_accounts() {
+            Ok(accounts) => accounts
+                .into_iter()
+                .find(|account| account.is_active)
+                .map(|account| account.id),
+            Err(err) => {
+                warn!("failed to list saved ChatGPT accounts: {err}");
+                None
+            }
+        }
+    }
+
+    fn saved_chatgpt_account_to_account(
+        account: codex_login::SavedChatgptAccount,
+    ) -> Option<Account> {
+        let email = account.email?;
+        Some(Account::Chatgpt {
+            email,
+            plan_type: Self::saved_chatgpt_plan_type_to_api(account.plan_type.as_deref()),
+        })
+    }
+
+    fn saved_chatgpt_plan_type_to_api(
+        plan_type: Option<&str>,
+    ) -> codex_protocol::account::PlanType {
+        use codex_protocol::account::PlanType;
+        match plan_type.unwrap_or("unknown").to_ascii_lowercase().as_str() {
+            "free" => PlanType::Free,
+            "go" => PlanType::Go,
+            "plus" => PlanType::Plus,
+            "pro" => PlanType::Pro,
+            "team" => PlanType::Team,
+            "business" => PlanType::Business,
+            "enterprise" => PlanType::Enterprise,
+            "edu" => PlanType::Edu,
+            _ => PlanType::Unknown,
         }
     }
 
@@ -1133,6 +1179,14 @@ impl CodexMessageProcessor {
                 self.cancel_login_v2(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::AccountList { request_id, params } => {
+                self.account_list(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AccountSwitch { request_id, params } => {
+                self.account_switch(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::GetAccount { request_id, params } => {
                 self.get_account(to_connection_request_id(request_id), params)
                     .await;
@@ -1456,9 +1510,18 @@ impl CodexMessageProcessor {
 
                             // Notify clients with the actual current auth mode.
                             let auth = auth_manager.auth_cached();
+                            let active_saved_account_id =
+                                match auth_manager.list_saved_chatgpt_accounts() {
+                                    Ok(accounts) => accounts
+                                        .into_iter()
+                                        .find(|account| account.is_active)
+                                        .map(|account| account.id),
+                                    Err(_) => None,
+                                };
                             let payload_v2 = AccountUpdatedNotification {
                                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                                active_saved_account_id,
                             };
                             outgoing_clone
                                 .send_server_notification(ServerNotification::AccountUpdated(
@@ -1563,9 +1626,18 @@ impl CodexMessageProcessor {
                                 .await;
 
                             let auth = auth_manager.auth_cached();
+                            let active_saved_account_id =
+                                match auth_manager.list_saved_chatgpt_accounts() {
+                                    Ok(accounts) => accounts
+                                        .into_iter()
+                                        .find(|account| account.is_active)
+                                        .map(|account| account.id),
+                                    Err(_) => None,
+                                };
                             let payload_v2 = AccountUpdatedNotification {
                                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                                active_saved_account_id,
                             };
                             outgoing_clone
                                 .send_server_notification(ServerNotification::AccountUpdated(
@@ -1630,6 +1702,210 @@ impl CodexMessageProcessor {
                 self.outgoing.send_error(request_id, error).await;
             }
         }
+    }
+
+    async fn account_list(&self, request_id: ConnectionRequestId, params: AccountListParams) {
+        let saved_accounts = match self.auth_manager.list_saved_chatgpt_accounts() {
+            Ok(accounts) => accounts,
+            Err(err) => {
+                self.outgoing
+                    .send_error(
+                        request_id,
+                        JSONRPCErrorError {
+                            code: INTERNAL_ERROR_CODE,
+                            message: format!("failed to list saved ChatGPT accounts: {err}"),
+                            data: None,
+                        },
+                    )
+                    .await;
+                return;
+            }
+        };
+
+        let active_saved_account_id = saved_accounts
+            .iter()
+            .find(|account| account.is_active)
+            .map(|account| account.id.clone());
+        let total = saved_accounts.len();
+        let limit = params.limit.unwrap_or(total as u32).max(1) as usize;
+        let effective_limit = limit.min(total);
+        let start = match params.cursor {
+            Some(cursor) => match cursor.parse::<usize>() {
+                Ok(idx) => idx,
+                Err(_) => {
+                    let error = JSONRPCErrorError {
+                        code: INVALID_REQUEST_ERROR_CODE,
+                        message: format!("invalid cursor: {cursor}"),
+                        data: None,
+                    };
+                    self.outgoing.send_error(request_id, error).await;
+                    return;
+                }
+            },
+            None => 0,
+        };
+
+        if start > total {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("cursor {start} exceeds total saved accounts {total}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        let end = start.saturating_add(effective_limit).min(total);
+        let data = saved_accounts[start..end]
+            .iter()
+            .filter_map(|account| {
+                Self::saved_chatgpt_account_to_account(account.clone()).map(|api_account| {
+                    SavedAccountSummary {
+                        saved_account_id: account.id.clone(),
+                        account: api_account,
+                    }
+                })
+            })
+            .collect();
+
+        self.outgoing
+            .send_response(
+                request_id,
+                AccountListResponse {
+                    data,
+                    next_cursor: (end < total).then(|| end.to_string()),
+                    active_saved_account_id,
+                },
+            )
+            .await;
+    }
+
+    async fn account_switch(&self, request_id: ConnectionRequestId, params: AccountSwitchParams) {
+        if matches!(
+            self.config.forced_login_method,
+            Some(ForcedLoginMethod::Api)
+        ) {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "ChatGPT account switching is disabled. Use API key login instead."
+                    .to_string(),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        if let Some(expected_workspace) = self.config.forced_chatgpt_workspace_id.as_deref() {
+            let saved_accounts = match self.auth_manager.list_saved_chatgpt_accounts() {
+                Ok(accounts) => accounts,
+                Err(err) => {
+                    let error = JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("failed to list saved ChatGPT accounts: {err}"),
+                        data: None,
+                    };
+                    self.outgoing.send_error(request_id, error).await;
+                    return;
+                }
+            };
+            let Some(account) = saved_accounts
+                .iter()
+                .find(|account| account.id.as_str() == params.saved_account_id.as_str())
+            else {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: format!(
+                        "saved ChatGPT account not found: {}",
+                        params.saved_account_id
+                    ),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            };
+            let matches_expected_workspace = account.chatgpt_workspace_id.as_deref()
+                == Some(expected_workspace)
+                || account.account_id.as_deref() == Some(expected_workspace);
+            if !matches_expected_workspace {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: format!(
+                        "ChatGPT account switching is restricted to workspace {expected_workspace}."
+                    ),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        }
+
+        {
+            let mut guard = self.active_login.lock().await;
+            if let Some(active) = guard.take() {
+                drop(active);
+            }
+        }
+
+        if let Err(err) = self
+            .auth_manager
+            .switch_active_chatgpt_account(&params.saved_account_id)
+        {
+            let error = JSONRPCErrorError {
+                code: if err.kind() == std::io::ErrorKind::NotFound {
+                    INVALID_REQUEST_ERROR_CODE
+                } else {
+                    INTERNAL_ERROR_CODE
+                },
+                message: format!("account switch failed: {err}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        self.config_manager.replace_cloud_requirements_loader(
+            self.auth_manager.clone(),
+            self.config.chatgpt_base_url.clone(),
+        );
+        self.config_manager
+            .sync_default_client_residency_requirement()
+            .await;
+
+        let provider = create_model_provider(
+            self.config.model_provider.clone(),
+            Some(self.auth_manager.clone()),
+        );
+        let account_state = match provider.account_state() {
+            Ok(account_state) => account_state,
+            Err(ProviderAccountError::MissingChatgptAccountDetails) => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "email and plan type are required for chatgpt authentication"
+                        .to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let account = account_state.account.map(Account::from);
+        let active_saved_account_id = self.current_active_saved_account_id();
+
+        self.outgoing
+            .send_response(
+                request_id,
+                AccountSwitchResponse {
+                    account,
+                    requires_openai_auth: account_state.requires_openai_auth,
+                    active_saved_account_id,
+                },
+            )
+            .await;
+        self.outgoing
+            .send_server_notification(ServerNotification::AccountUpdated(
+                self.current_account_updated_notification(),
+            ))
+            .await;
     }
 
     async fn login_chatgpt_auth_tokens(
@@ -1758,6 +2034,7 @@ impl CodexMessageProcessor {
                 let payload_v2 = AccountUpdatedNotification {
                     auth_mode: current_auth_method,
                     plan_type: None,
+                    active_saved_account_id: self.current_active_saved_account_id(),
                 };
                 self.outgoing
                     .send_server_notification(ServerNotification::AccountUpdated(payload_v2))
@@ -1874,6 +2151,7 @@ impl CodexMessageProcessor {
         let response = GetAccountResponse {
             account,
             requires_openai_auth: account_state.requires_openai_auth,
+            active_saved_account_id: self.current_active_saved_account_id(),
         };
         self.outgoing.send_response(request_id, response).await;
     }

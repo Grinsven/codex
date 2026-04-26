@@ -281,6 +281,9 @@ impl ChatWidget {
             SlashCommand::Experimental => {
                 self.open_experimental_popup();
             }
+            SlashCommand::Account => {
+                self.open_saved_chatgpt_account_picker();
+            }
             SlashCommand::Memories => {
                 self.open_memories_popup();
             }
@@ -754,6 +757,7 @@ impl ChatWidget {
             | SlashCommand::ElevateSandbox
             | SlashCommand::SandboxReadRoot
             | SlashCommand::Experimental
+            | SlashCommand::Account
             | SlashCommand::Memories
             | SlashCommand::Quit
             | SlashCommand::Exit
