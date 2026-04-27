@@ -36,6 +36,10 @@
         "$ref": "#/definitions/AgentRoleToml"
       },
       "properties": {
+        "interrupt_message": {
+          "description": "Whether to record a model-visible message when an agent turn is interrupted. Defaults to true.",
+          "type": "boolean"
+        },
         "job_max_runtime_seconds": {
           "description": "Default maximum runtime in seconds for agent job workers.",
           "format": "uint64",
@@ -420,6 +424,9 @@
             "general_analytics": {
               "type": "boolean"
             },
+            "goals": {
+              "type": "boolean"
+            },
             "guardian_approval": {
               "type": "boolean"
             },
@@ -519,6 +526,9 @@
             "telepathy": {
               "type": "boolean"
             },
+            "terminal_resize_reflow": {
+              "type": "boolean"
+            },
             "tool_call_mcp_elicitation": {
               "type": "boolean"
             },
@@ -578,16 +588,6 @@
         },
         "include_permissions_instructions": {
           "type": "boolean"
-        },
-        "js_repl_node_module_dirs": {
-          "description": "Ordered list of directories to search for Node modules in `js_repl`.",
-          "items": {
-            "$ref": "#/definitions/AbsolutePathBuf"
-          },
-          "type": "array"
-        },
-        "js_repl_node_path": {
-          "$ref": "#/definitions/AbsolutePathBuf"
         },
         "model": {
           "type": "string"
@@ -2085,9 +2085,49 @@
         "include_instructions": {
           "description": "Whether turns receive the automatic skills instructions block.",
           "type": "boolean"
+        },
+        "context_budget_warnings": {
+          "description": "Whether to show warnings when skill metadata is truncated to fit the context budget.",
+          "type": "boolean"
         }
       },
       "type": "object"
+    },
+    "ThreadStoreToml": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "remote"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "endpoint",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ToolSuggestConfig": {
       "additionalProperties": false,
@@ -2218,6 +2258,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "terminal_resize_reflow_max_rows": {
+          "default": null,
+          "description": "Trim terminal resize-reflow replay to the most recent rendered terminal rows when the transcript exceeds this cap. Omit to use Codex's terminal-specific default. Set to `0` to keep all rendered rows.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "terminal_title": {
           "default": null,
@@ -2485,6 +2532,14 @@
       "description": "Experimental / do not use. When set, app-server fetches thread-scoped config from a remote service at this endpoint.",
       "type": "string"
     },
+    "experimental_thread_store": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ThreadStoreToml"
+        }
+      ],
+      "description": "Experimental / do not use. Selects the thread store implementation."
+    },
     "experimental_thread_store_endpoint": {
       "description": "Experimental / do not use. When set, app-server uses a remote thread store at this endpoint instead of the local filesystem/SQLite store.",
       "type": "string"
@@ -2576,6 +2631,9 @@
           "type": "boolean"
         },
         "general_analytics": {
+          "type": "boolean"
+        },
+        "goals": {
           "type": "boolean"
         },
         "guardian_approval": {
@@ -2675,6 +2733,9 @@
           "type": "boolean"
         },
         "telepathy": {
+          "type": "boolean"
+        },
+        "terminal_resize_reflow": {
           "type": "boolean"
         },
         "tool_call_mcp_elicitation": {
@@ -2800,21 +2861,6 @@
     "instructions": {
       "description": "System instructions.",
       "type": "string"
-    },
-    "js_repl_node_module_dirs": {
-      "description": "Ordered list of directories to search for Node modules in `js_repl`.",
-      "items": {
-        "$ref": "#/definitions/AbsolutePathBuf"
-      },
-      "type": "array"
-    },
-    "js_repl_node_path": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/AbsolutePathBuf"
-        }
-      ],
-      "description": "Optional absolute path to the Node runtime used by `js_repl`."
     },
     "log_dir": {
       "allOf": [

@@ -427,10 +427,12 @@ mod phase2 {
     use chrono::Duration as ChronoDuration;
     use chrono::Utc;
     use codex_config::Constrained;
+    use codex_config::types::McpServerConfig;
     use codex_features::Feature;
     use codex_login::CodexAuth;
     use codex_protocol::AgentPath;
     use codex_protocol::ThreadId;
+    use codex_protocol::models::PermissionProfile;
     use codex_protocol::permissions::FileSystemSandboxPolicy;
     use codex_protocol::permissions::NetworkSandboxPolicy;
     use codex_protocol::protocol::AskForApproval;
@@ -440,6 +442,7 @@ mod phase2 {
     use codex_state::Phase2JobClaimOutcome;
     use codex_state::Stage1Output;
     use codex_state::ThreadMetadataBuilder;
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -470,14 +473,25 @@ mod phase2 {
 
     impl DispatchHarness {
         async fn new() -> Self {
+            Self::new_with_config(|_| {}).await
+        }
+
+        async fn new_with_config(configure: impl FnOnce(&mut Config)) -> Self {
             let codex_home = tempfile::tempdir().expect("create temp codex home");
             let mut config = test_config().await;
             config.codex_home =
                 codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(codex_home.path())
                     .expect("codex home is absolute");
             config.cwd = config.codex_home.clone();
-            config.permissions.file_system_sandbox_policy = FileSystemSandboxPolicy::unrestricted();
-            config.permissions.network_sandbox_policy = NetworkSandboxPolicy::Enabled;
+            let permission_profile = PermissionProfile::from_runtime_permissions(
+                &FileSystemSandboxPolicy::unrestricted(),
+                NetworkSandboxPolicy::Enabled,
+            );
+            config
+                .permissions
+                .set_permission_profile(permission_profile)
+                .expect("permissions are configurable");
+            configure(&mut config);
             let config = Arc::new(config);
 
             let state_db = codex_state::StateRuntime::init(
@@ -642,7 +656,24 @@ mod phase2 {
 
     #[tokio::test]
     async fn dispatch_reclaims_stale_global_lock_and_starts_consolidation() {
-        let harness = DispatchHarness::new().await;
+        let harness = DispatchHarness::new_with_config(|config| {
+            let server: McpServerConfig =
+                toml::from_str("command = \"docs-server\"").expect("deserialize MCP server");
+            config
+                .mcp_servers
+                .set(HashMap::from([("docs".to_string(), server)]))
+                .expect("parent MCP servers are configurable");
+            config
+                .features
+                .enable(Feature::Apps)
+                .expect("apps feature is configurable");
+            config
+                .features
+                .enable(Feature::Plugins)
+                .expect("plugins feature is configurable");
+            config.include_apps_instructions = true;
+        })
+        .await;
         harness.seed_stage1_output(Utc::now().timestamp()).await;
 
         let stale_claim = harness
@@ -688,14 +719,16 @@ mod phase2 {
             memory_root(&harness.config.codex_home).as_path()
         );
         match &config_snapshot.sandbox_policy {
-            SandboxPolicy::WorkspaceWrite {
-                writable_roots,
-                network_access,
-                ..
-            } => {
+            SandboxPolicy::WorkspaceWrite { network_access, .. } => {
                 assert!(!*network_access);
+                let effective_writable_roots: Vec<_> = config_snapshot
+                    .sandbox_policy
+                    .get_writable_roots_with_cwd(config_snapshot.cwd.as_path())
+                    .into_iter()
+                    .map(|root| root.root)
+                    .collect();
                 pretty_assertions::assert_eq!(
-                    writable_roots.as_slice(),
+                    effective_writable_roots.as_slice(),
                     [memory_root(&harness.config.codex_home)],
                     "consolidation subagent should only be able to write the memory root"
                 );
@@ -716,40 +749,68 @@ mod phase2 {
             "memory consolidation should not be registered in the root collab agent registry"
         );
         let turn_context = subagent.codex.session.new_default_turn().await;
-        pretty_assertions::assert_eq!(
-            turn_context.file_system_sandbox_policy,
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+        let file_system_sandbox_policy = turn_context.file_system_sandbox_policy();
+        let legacy_file_system_sandbox_policy =
+            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
                 &config_snapshot.sandbox_policy,
+                config_snapshot.cwd.as_path(),
+            );
+        assert!(
+            file_system_sandbox_policy.is_semantically_equivalent_to(
+                &legacy_file_system_sandbox_policy,
                 config_snapshot.cwd.as_path(),
             ),
             "consolidation subagent split filesystem policy should match the memory-root legacy policy"
         );
         assert!(
-            turn_context
-                .file_system_sandbox_policy
-                .can_write_path_with_cwd(
-                    memory_root(&harness.config.codex_home).as_path(),
-                    config_snapshot.cwd.as_path(),
-                ),
+            file_system_sandbox_policy.can_write_path_with_cwd(
+                memory_root(&harness.config.codex_home).as_path(),
+                config_snapshot.cwd.as_path(),
+            ),
             "consolidation subagent should be able to write the memory root"
         );
         assert!(
-            !turn_context
-                .file_system_sandbox_policy
-                .can_write_path_with_cwd(
-                    harness.config.codex_home.join("config.toml").as_path(),
-                    config_snapshot.cwd.as_path(),
-                ),
+            !file_system_sandbox_policy.can_write_path_with_cwd(
+                harness.config.codex_home.join("config.toml").as_path(),
+                config_snapshot.cwd.as_path(),
+            ),
             "consolidation subagent should not inherit codex_home write access"
         );
         pretty_assertions::assert_eq!(
-            turn_context.network_sandbox_policy,
+            turn_context.network_sandbox_policy(),
             NetworkSandboxPolicy::Restricted,
             "consolidation subagent split network policy should preserve no-network sandboxing"
         );
         assert!(
             !turn_context.features.enabled(Feature::MemoryTool),
             "consolidation subagent should have the memories feature disabled"
+        );
+        assert!(
+            turn_context.config.mcp_servers.get().is_empty(),
+            "consolidation subagent should not inherit configured MCP servers"
+        );
+        assert!(
+            !subagent
+                .codex
+                .session
+                .services
+                .mcp_connection_manager
+                .read()
+                .await
+                .has_servers(),
+            "consolidation subagent should not initialize MCP servers"
+        );
+        assert!(
+            !turn_context.features.enabled(Feature::Apps),
+            "consolidation subagent should not expose app-backed MCP"
+        );
+        assert!(
+            !turn_context.features.enabled(Feature::Plugins),
+            "consolidation subagent should not expose plugin-backed MCP"
+        );
+        assert!(
+            !turn_context.config.include_apps_instructions,
+            "consolidation subagent should not include apps instructions"
         );
         assert!(
             !turn_context.config.memories.generate_memories,
@@ -874,8 +935,9 @@ mod phase2 {
             .await
             .expect("enqueue global consolidation");
         let mut constrained_config = harness.config.as_ref().clone();
-        constrained_config.permissions.sandbox_policy =
-            Constrained::allow_only(SandboxPolicy::DangerFullAccess);
+        constrained_config.permissions.permission_profile = Constrained::allow_only(
+            PermissionProfile::from_legacy_sandbox_policy(&SandboxPolicy::DangerFullAccess),
+        );
 
         phase2::run(&harness.session, Arc::new(constrained_config)).await;
 

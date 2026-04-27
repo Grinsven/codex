@@ -69,6 +69,7 @@ url = "{mcp_server_url}/mcp"
         .send_list_mcp_server_status_request(ListMcpServerStatusParams {
             cursor: None,
             limit: None,
+            cwd: None,
             detail: None,
         })
         .await?;
@@ -240,6 +241,7 @@ url = "{mcp_server_url}/mcp"
         .send_list_mcp_server_status_request(ListMcpServerStatusParams {
             cursor: None,
             limit: None,
+            cwd: None,
             detail: Some(McpServerStatusDetail::ToolsAndAuthOnly),
         })
         .await?;
@@ -304,6 +306,7 @@ url = "{underscore_server_url}/mcp"
         .send_list_mcp_server_status_request(ListMcpServerStatusParams {
             cursor: None,
             limit: None,
+            cwd: None,
             detail: None,
         })
         .await?;

@@ -31,6 +31,10 @@ pub struct SkillsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_instructions: Option<bool>,
 
+    /// Whether to show warnings when skill metadata is truncated to fit the context budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_budget_warnings: Option<bool>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<SkillConfig>,
 }

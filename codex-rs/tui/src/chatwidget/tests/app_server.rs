@@ -26,7 +26,6 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
             new_agent_nickname: Some("Robie".to_string()),
             new_agent_role: Some("explorer".to_string()),
             prompt: "Explore the repo".to_string(),
-            worktree: None,
             model: "gpt-5".to_string(),
             reasoning_effort: ReasoningEffortConfig::High,
             status: AgentStatus::PendingInit,
@@ -192,7 +191,7 @@ async fn live_app_server_warning_notification_renders_message() {
     chat.handle_server_notification(
         ServerNotification::Warning(WarningNotification {
             thread_id: None,
-            message: "Warning: Exceeded skills context budget of 2%. All skill descriptions were removed and 2 additional skills were not included in the model-visible skills list.".to_string(),
+            message: "Warning: Exceeded skills context budget of 5%. All skill descriptions were removed and 2 additional skills were not included in the model-visible skills list.".to_string(),
         }),
         /*replay_kind*/ None,
     );
@@ -202,7 +201,7 @@ async fn live_app_server_warning_notification_renders_message() {
     let rendered = lines_to_single_string(&cells[0]);
     let normalized = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        normalized.contains("Warning: Exceeded skills context budget of 2%."),
+        normalized.contains("Warning: Exceeded skills context budget of 5%."),
         "expected warning notification message, got {rendered}"
     );
     assert!(

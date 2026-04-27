@@ -13,7 +13,7 @@ PLATFORMS = [
     "windows_arm64",
 ]
 
-CODEX_CARGO_VERSION = "0.125.0-alpha.2"
+CODEX_CARGO_VERSION = "0.126.0-alpha.5"
 
 RELEASE_PLATFORM_TARGETS = {
     "linux_arm64_musl": "//:release_linux_arm64_musl",
