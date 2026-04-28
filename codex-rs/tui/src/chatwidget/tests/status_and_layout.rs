@@ -1455,6 +1455,44 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 }
 
 #[tokio::test]
+async fn status_line_model_with_reasoning_marks_served_model_match() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
+
+    chat.handle_codex_event(Event {
+        id: "model-served".into(),
+        msg: EventMsg::ModelServed(ModelServedEvent {
+            requested_model: "gpt-5.5".to_string(),
+            served_model: "gpt-5.5".to_string(),
+        }),
+    });
+
+    assert_eq!(status_line_text(&chat), Some("gpt-5.5 xhigh ✓".to_string()));
+}
+
+#[tokio::test]
+async fn status_line_model_with_reasoning_marks_model_reroute() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
+
+    chat.handle_codex_event(Event {
+        id: "model-reroute".into(),
+        msg: EventMsg::ModelReroute(ModelRerouteEvent {
+            from_model: "gpt-5.5".to_string(),
+            to_model: "gpt-5.2".to_string(),
+            reason: ModelRerouteReason::HighRiskCyberActivity,
+        }),
+    });
+
+    assert_eq!(
+        status_line_text(&chat),
+        Some("gpt-5.5→gpt-5.2 xhigh ⚠".to_string())
+    );
+}
+
+#[tokio::test]
 async fn terminal_title_model_updates_on_model_change_without_manual_refresh() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.config.tui_terminal_title = Some(vec!["model".to_string()]);

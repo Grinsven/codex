@@ -315,6 +315,7 @@ pub(super) async fn make_chatwidget_manual(
         status_line_branch_cwd: None,
         status_line_branch_pending: false,
         status_line_branch_lookup_complete: false,
+        model_serving_status: None,
         current_goal_status_indicator: None,
         current_goal_status: None,
         goal_status_active_turn_started_at: None,

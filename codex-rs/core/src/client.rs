@@ -1654,6 +1654,8 @@ where
                 }
                 Ok(ResponseEvent::Completed {
                     response_id,
+                    response_model,
+                    generates_output,
                     token_usage,
                     end_turn,
                 }) => {
@@ -1680,6 +1682,8 @@ where
                     if tx_event
                         .send(Ok(ResponseEvent::Completed {
                             response_id,
+                            response_model,
+                            generates_output,
                             token_usage,
                             end_turn,
                         }))

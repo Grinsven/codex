@@ -1412,6 +1412,9 @@ pub enum EventMsg {
     /// Model routing changed from the requested model to a different model.
     ModelReroute(ModelRerouteEvent),
 
+    /// Backend reported the model that served the generated response.
+    ModelServed(ModelServedEvent),
+
     /// Backend recommends additional account verification for this turn.
     ModelVerification(ModelVerificationEvent),
 
@@ -2063,6 +2066,12 @@ pub struct ModelRerouteEvent {
     pub from_model: String,
     pub to_model: String,
     pub reason: ModelRerouteReason,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ModelServedEvent {
+    pub requested_model: String,
+    pub served_model: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
