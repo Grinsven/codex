@@ -1488,6 +1488,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         | EventMsg::RealtimeConversationRealtime(_)
         | EventMsg::RealtimeConversationClosed(_)
         | EventMsg::ModelReroute(_)
+        | EventMsg::ModelServed(_)
         | EventMsg::ModelVerification(_)
         | EventMsg::ContextCompacted(_)
         | EventMsg::ThreadRolledBack(_)
@@ -2097,16 +2098,20 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::ServerModel(server_model) => {
-                if !turn_context
+                if server_model.eq_ignore_ascii_case(&turn_context.model_info.slug) {
+                    sess.emit_model_served(&turn_context, server_model).await;
+                } else if !turn_context
                     .server_model_warning_emitted
                     .load(Ordering::Relaxed)
-                    && sess
+                {
+                    if sess
                         .maybe_warn_on_server_model_mismatch(&turn_context, server_model)
                         .await
-                {
-                    turn_context
-                        .server_model_warning_emitted
-                        .store(true, Ordering::Relaxed);
+                    {
+                        turn_context
+                            .server_model_warning_emitted
+                            .store(true, Ordering::Relaxed);
+                    }
                 }
             }
             ResponseEvent::ModelVerifications(verifications) => {
@@ -2132,6 +2137,8 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::Completed {
                 response_id: _,
+                response_model,
+                generates_output,
                 token_usage,
                 end_turn,
             } => {
@@ -2147,6 +2154,23 @@ async fn try_run_sampling_request(
                 should_emit_turn_diff = true;
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
+                }
+                if generates_output != Some(false)
+                    && let Some(response_model) = response_model
+                {
+                    if response_model.eq_ignore_ascii_case(&turn_context.model_info.slug) {
+                        sess.emit_model_served(&turn_context, response_model).await;
+                    } else if !turn_context
+                        .server_model_warning_emitted
+                        .load(Ordering::Relaxed)
+                        && sess
+                            .maybe_warn_on_server_model_mismatch(&turn_context, response_model)
+                            .await
+                    {
+                        turn_context
+                            .server_model_warning_emitted
+                            .store(true, Ordering::Relaxed);
+                    }
                 }
                 break Ok(SamplingRequestResult {
                     needs_follow_up,

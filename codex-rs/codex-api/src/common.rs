@@ -80,6 +80,12 @@ pub enum ResponseEvent {
     ServerReasoningIncluded(bool),
     Completed {
         response_id: String,
+        /// Model reported in the final response payload, if present.
+        response_model: Option<String>,
+        /// Service `response.generate` flag, if present. The service can emit
+        /// non-generating warmup responses with `generate: false`; callers that
+        /// need proof for the actual user-visible response should ignore those.
+        generates_output: Option<bool>,
         token_usage: Option<TokenUsage>,
         /// Did the model affirmatively end its turn? Some providers do not set this,
         /// so we rely on fallback logic when this is `None`.

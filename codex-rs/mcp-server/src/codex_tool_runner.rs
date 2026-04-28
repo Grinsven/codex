@@ -265,6 +265,7 @@ async fn run_codex_tool_session_inner(
                     }
                     EventMsg::Warning(_)
                     | EventMsg::GuardianWarning(_)
+                    | EventMsg::ModelServed(_)
                     | EventMsg::ModelVerification(_) => {
                         continue;
                     }

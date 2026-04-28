@@ -332,6 +332,7 @@ use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::McpServerRefreshConfig;
 use codex_protocol::protocol::ModelRerouteEvent;
 use codex_protocol::protocol::ModelRerouteReason;
+use codex_protocol::protocol::ModelServedEvent;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::ModelVerificationEvent;
 use codex_protocol::protocol::NetworkApprovalContext;
@@ -2409,6 +2410,21 @@ impl Session {
         self.record_model_warning(warning_message, turn_context)
             .await;
         true
+    }
+
+    pub(crate) async fn emit_model_served(
+        self: &Arc<Self>,
+        turn_context: &Arc<TurnContext>,
+        served_model: String,
+    ) {
+        self.send_event(
+            turn_context,
+            EventMsg::ModelServed(ModelServedEvent {
+                requested_model: turn_context.model_info.slug.clone(),
+                served_model,
+            }),
+        )
+        .await;
     }
 
     pub(crate) async fn emit_model_verification(

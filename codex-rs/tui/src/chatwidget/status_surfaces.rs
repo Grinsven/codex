@@ -421,7 +421,7 @@ impl ChatWidget {
     /// git metadata.
     pub(super) fn status_line_value_for_item(&mut self, item: &StatusLineItem) -> Option<String> {
         match item {
-            StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
+            StatusLineItem::ModelName => Some(self.status_line_model_display_name()),
             StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(
@@ -609,7 +609,43 @@ impl ChatWidget {
             } else {
                 ""
             };
-        format!("{} {label}{fast_label}", self.model_display_name())
+        format!(
+            "{} {label}{fast_label}{}",
+            self.status_line_model_base_display_name(),
+            self.status_line_model_serving_suffix()
+        )
+    }
+
+    fn status_line_model_display_name(&self) -> String {
+        format!(
+            "{}{}",
+            self.status_line_model_base_display_name(),
+            self.status_line_model_serving_suffix()
+        )
+    }
+
+    fn status_line_model_base_display_name(&self) -> String {
+        let model = self.model_display_name();
+        match self.model_serving_status.as_ref() {
+            Some(status) if !status.matches_requested_model() => {
+                format!("{}→{}", status.requested_model, status.served_model)
+            }
+            _ => model.to_string(),
+        }
+    }
+
+    fn status_line_model_serving_suffix(&self) -> &'static str {
+        match self.model_serving_status.as_ref() {
+            Some(status) if !status.matches_requested_model() => " ⚠",
+            Some(status)
+                if status
+                    .requested_model
+                    .eq_ignore_ascii_case(self.model_display_name()) =>
+            {
+                " ✓"
+            }
+            _ => "",
+        }
     }
 
     /// Computes the compact runtime status label used by the terminal title.

@@ -203,6 +203,8 @@ use codex_protocol::protocol::McpStartupUpdateEvent;
 use codex_protocol::protocol::McpToolCallBeginEvent;
 use codex_protocol::protocol::McpToolCallEndEvent;
 #[cfg(test)]
+use codex_protocol::protocol::ModelRerouteEvent;
+#[cfg(test)]
 use codex_protocol::protocol::ModelVerification as CoreModelVerification;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::PatchApplyBeginEvent;
@@ -1068,6 +1070,8 @@ pub(crate) struct ChatWidget {
     status_line_branch_pending: bool,
     // True once we've attempted a branch lookup for the current CWD.
     status_line_branch_lookup_complete: bool,
+    // Last backend-reported model for the generated response.
+    model_serving_status: Option<ModelServingStatus>,
     // Current thread-goal status shown in the status line when plan mode is inactive.
     current_goal_status_indicator: Option<GoalStatusIndicator>,
     current_goal_status: Option<GoalStatusState>,
@@ -1088,6 +1092,19 @@ pub(crate) struct ChatWidget {
 struct CollabAgentMetadata {
     agent_nickname: Option<String>,
     agent_role: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ModelServingStatus {
+    requested_model: String,
+    served_model: String,
+}
+
+impl ModelServingStatus {
+    fn matches_requested_model(&self) -> bool {
+        self.requested_model
+            .eq_ignore_ascii_case(&self.served_model)
+    }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -2420,6 +2437,7 @@ impl ChatWidget {
         self.status_line_project_root_name_cache = None;
         let forked_from_id = event.forked_from_id;
         let model_for_header = event.model.clone();
+        let previous_model = self.current_model().to_string();
         self.session_header.set_model(&model_for_header);
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             Some(model_for_header.clone()),
@@ -2429,6 +2447,9 @@ impl ChatWidget {
         if let Some(mask) = self.active_collaboration_mask.as_mut() {
             mask.model = Some(model_for_header.clone());
             mask.reasoning_effort = Some(event.reasoning_effort);
+        }
+        if !previous_model.eq_ignore_ascii_case(self.current_model()) {
+            self.model_serving_status = None;
         }
         self.refresh_model_display();
         self.refresh_status_surfaces();
@@ -3478,6 +3499,26 @@ impl ChatWidget {
     fn on_warning(&mut self, message: impl Into<String>) {
         self.add_to_history(history_cell::new_warning_event(message.into()));
         self.request_redraw();
+    }
+
+    fn on_model_served(&mut self, requested_model: String, served_model: String) {
+        self.model_serving_status = Some(ModelServingStatus {
+            requested_model,
+            served_model,
+        });
+        self.refresh_status_line();
+    }
+
+    #[cfg(test)]
+    fn on_core_model_reroute(&mut self, event: ModelRerouteEvent) {
+        self.on_model_served(event.from_model, event.to_model);
+    }
+
+    fn on_app_server_model_reroute(
+        &mut self,
+        notification: codex_app_server_protocol::ModelReroutedNotification,
+    ) {
+        self.on_model_served(notification.from_model, notification.to_model);
     }
 
     #[cfg(test)]
@@ -5669,6 +5710,7 @@ impl ChatWidget {
             status_line_branch_cwd: None,
             status_line_branch_pending: false,
             status_line_branch_lookup_complete: false,
+            model_serving_status: None,
             current_goal_status_indicator: None,
             current_goal_status: None,
             goal_status_active_turn_started_at: None,
@@ -7100,7 +7142,9 @@ impl ChatWidget {
             ServerNotification::SkillsChanged(_) => {
                 self.refresh_skills_for_current_cwd(/*force_reload*/ true);
             }
-            ServerNotification::ModelRerouted(_) => {}
+            ServerNotification::ModelRerouted(notification) => {
+                self.on_app_server_model_reroute(notification)
+            }
             ServerNotification::ModelVerification(notification) => {
                 self.on_app_server_model_verification(&notification.verifications)
             }
@@ -7639,7 +7683,10 @@ impl ChatWidget {
             EventMsg::Warning(WarningEvent { message })
             | EventMsg::GuardianWarning(WarningEvent { message }) => self.on_warning(message),
             EventMsg::GuardianAssessment(ev) => self.on_guardian_assessment(ev),
-            EventMsg::ModelReroute(_) => {}
+            EventMsg::ModelReroute(event) => self.on_core_model_reroute(event),
+            EventMsg::ModelServed(event) => {
+                self.on_model_served(event.requested_model, event.served_model)
+            }
             EventMsg::ModelVerification(event) => {
                 self.on_core_model_verification(&event.verifications)
             }
@@ -10626,6 +10673,7 @@ impl ChatWidget {
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
+        let previous_model = self.current_model().to_string();
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             Some(model.to_string()),
             /*effort*/ None,
@@ -10635,6 +10683,9 @@ impl ChatWidget {
             && let Some(mask) = self.active_collaboration_mask.as_mut()
         {
             mask.model = Some(model.to_string());
+        }
+        if !previous_model.eq_ignore_ascii_case(self.current_model()) {
+            self.model_serving_status = None;
         }
         self.refresh_model_dependent_surfaces();
     }
@@ -10980,6 +11031,9 @@ impl ChatWidget {
             mask.reasoning_effort = Some(Some(effort));
         }
         self.active_collaboration_mask = Some(mask);
+        if !previous_model.eq_ignore_ascii_case(self.current_model()) {
+            self.model_serving_status = None;
+        }
         self.update_collaboration_mode_indicator();
         self.refresh_model_dependent_surfaces();
         let next_mode = self.active_mode_kind();
