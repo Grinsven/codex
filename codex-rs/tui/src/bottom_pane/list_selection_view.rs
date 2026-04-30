@@ -16,6 +16,8 @@ use super::selection_popup_common::render_menu_surface;
 use super::selection_popup_common::wrap_styled_line;
 use crate::app_event_sender::AppEventSender;
 use crate::key_hint::KeyBinding;
+use crate::key_hint::KeyBindingListExt;
+use crate::keymap::ListKeymap;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 
@@ -99,18 +101,8 @@ pub(crate) enum SelectionRowDisplay {
     SingleLine,
 }
 
-#[derive(Clone, Copy)]
-enum DescriptionVariant {
-    Selected,
-    Widest,
-}
-
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
-pub(crate) struct SelectionShortcutAction {
-    pub binding: KeyBinding,
-    pub action: SelectionAction,
-}
 pub(crate) type SelectionToggleAction = dyn Fn(bool, &AppEventSender) + Send + Sync;
 
 pub(crate) struct SelectionToggle {
@@ -147,7 +139,6 @@ pub(crate) struct SelectionItem {
     pub is_default: bool,
     pub is_disabled: bool,
     pub actions: Vec<SelectionAction>,
-    pub shortcut_actions: Vec<SelectionShortcutAction>,
     pub dismiss_on_select: bool,
     pub dismiss_parent_on_child_accept: bool,
     pub search_value: Option<String>,
@@ -276,26 +267,7 @@ pub(crate) struct ListSelectionView {
 
     /// Called when the picker is dismissed via Esc/Ctrl+C without selecting.
     on_cancel: OnCancelCallback,
-}
-
-fn widest_description(
-    description: Option<&String>,
-    selected_description: Option<&String>,
-) -> Option<String> {
-    match (description, selected_description) {
-        (Some(description), Some(selected_description)) => {
-            let description_width = UnicodeWidthStr::width(description.as_str());
-            let selected_width = UnicodeWidthStr::width(selected_description.as_str());
-            if selected_width > description_width {
-                Some(selected_description.clone())
-            } else {
-                Some(description.clone())
-            }
-        }
-        (Some(description), None) => Some(description.clone()),
-        (None, Some(selected_description)) => Some(selected_description.clone()),
-        (None, None) => None,
-    }
+    keymap: ListKeymap,
 }
 
 impl ListSelectionView {
@@ -306,7 +278,11 @@ impl ListSelectionView {
     /// When search is enabled, rows without `search_value` will disappear as
     /// soon as the query is non-empty, which can look like dropped data unless
     /// callers intentionally populate that field.
-    pub fn new(params: SelectionViewParams, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        params: SelectionViewParams,
+        app_event_tx: AppEventSender,
+        keymap: ListKeymap,
+    ) -> Self {
         let mut header = params.header;
         if params.title.is_some() || params.subtitle.is_some() {
             let title = params.title.map(|title| Line::from(title.bold()));
@@ -361,6 +337,7 @@ impl ListSelectionView {
             preserve_side_content_bg: params.preserve_side_content_bg,
             on_selection_changed: params.on_selection_changed,
             on_cancel: params.on_cancel,
+            keymap,
         };
         s.apply_filter();
         if s.tabs_enabled() && !has_initial_selected_idx && s.state.selected_idx.is_none() {
@@ -488,7 +465,7 @@ impl ListSelectionView {
         }
     }
 
-    fn build_rows(&self, description_variant: DescriptionVariant) -> Vec<GenericDisplayRow> {
+    fn build_rows(&self) -> Vec<GenericDisplayRow> {
         let enabled_row_number_width = self
             .filtered_indices
             .iter()
@@ -539,16 +516,10 @@ impl ListSelectionView {
                         name_prefix_spans.push(placeholder.into());
                     }
                     name_prefix_spans.extend(item.name_prefix_spans.clone());
-                    let description = match description_variant {
-                        DescriptionVariant::Selected => is_selected
-                            .then(|| item.selected_description.clone())
-                            .flatten()
-                            .or_else(|| item.description.clone()),
-                        DescriptionVariant::Widest => widest_description(
-                            item.description.as_ref(),
-                            item.selected_description.as_ref(),
-                        ),
-                    };
+                    let description = is_selected
+                        .then(|| item.selected_description.clone())
+                        .flatten()
+                        .or_else(|| item.description.clone());
                     let wrap_indent = description.is_none().then_some(wrap_prefix_width);
                     GenericDisplayRow {
                         name: name_with_marker,
@@ -564,14 +535,6 @@ impl ListSelectionView {
                 })
             })
             .collect()
-    }
-
-    fn measured_rows(&self) -> Vec<GenericDisplayRow> {
-        self.build_rows(DescriptionVariant::Widest)
-    }
-
-    fn rendered_rows(&self) -> Vec<GenericDisplayRow> {
-        self.build_rows(DescriptionVariant::Selected)
     }
 
     fn switch_tab(&mut self, step: isize) {
@@ -671,28 +634,6 @@ impl ListSelectionView {
 
         toggle.is_on = !toggle.is_on;
         (toggle.action)(toggle.is_on, &app_event_tx);
-    }
-
-    fn handle_selected_shortcut_action(&mut self, key_event: KeyEvent) -> bool {
-        let Some(actual_idx) = self.selected_actual_idx() else {
-            return false;
-        };
-        let Some(item) = self.active_items().get(actual_idx) else {
-            return false;
-        };
-        if item.is_disabled || item.disabled_reason.is_some() {
-            return false;
-        }
-        let Some(shortcut_action) = item
-            .shortcut_actions
-            .iter()
-            .find(|shortcut_action| shortcut_action.binding.is_press(key_event))
-        else {
-            return false;
-        };
-
-        (shortcut_action.action)(&self.app_event_tx);
-        true
     }
 
     fn move_up(&mut self) {
@@ -867,23 +808,25 @@ impl ListSelectionView {
 
 impl BottomPaneView for ListSelectionView {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event {
-            // Some terminals (or configurations) send Control key chords as
-            // C0 control characters without reporting the CONTROL modifier.
-            // Handle fallbacks for Ctrl-P/N here so navigation works everywhere.
+        let is_plain_text_char = matches!(
+            key_event,
             KeyEvent {
-                code: KeyCode::Up, ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('p'),
-                modifiers: KeyModifiers::CONTROL,
+                code: KeyCode::Char(ch),
+                modifiers,
                 ..
+            } if !ch.is_ascii_control()
+                && !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT)
+        );
+        let allow_plain_char_navigation = !self.is_searchable || !is_plain_text_char;
+
+        match key_event {
+            _ if allow_plain_char_navigation && self.keymap.move_up.is_pressed(key_event) => {
+                self.move_up()
             }
-            | KeyEvent {
-                code: KeyCode::Char('\u{0010}'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } /* ^P */ => self.move_up(),
+            _ if allow_plain_char_navigation && self.keymap.move_down.is_pressed(key_event) => {
+                self.move_down()
+            }
             KeyEvent {
                 code: KeyCode::Left,
                 ..
@@ -892,30 +835,6 @@ impl BottomPaneView for ListSelectionView {
                 code: KeyCode::Right,
                 ..
             } if self.tabs_enabled() => self.switch_tab(/*step*/ 1),
-            KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } if !self.is_searchable => self.move_up(),
-            KeyEvent {
-                code: KeyCode::Down,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('n'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('\u{000e}'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } /* ^N */ => self.move_down(),
-            KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } if !self.is_searchable => self.move_down(),
             KeyEvent {
                 code: KeyCode::Backspace,
                 ..
@@ -939,12 +858,14 @@ impl BottomPaneView for ListSelectionView {
             } if self.is_searchable
                 && self.search_query.is_empty()
                 && self.selected_item_has_toggle_placeholder() => {}
-            key_event if self.handle_selected_shortcut_action(key_event) => {}
-            KeyEvent {
-                code: KeyCode::Esc, ..
-            } => {
+            _ if self.keymap.cancel.is_pressed(key_event) => {
                 self.on_ctrl_c();
             }
+            _ if self.keymap.accept.is_pressed(key_event) => self.accept(),
+            KeyEvent {
+                code: KeyCode::Char(c),
+                ..
+            } if c.is_ascii_control() => {}
             KeyEvent {
                 code: KeyCode::Char(c),
                 modifiers,
@@ -982,11 +903,6 @@ impl BottomPaneView for ListSelectionView {
                     self.accept();
                 }
             }
-            KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => self.accept(),
             _ => {}
         }
     }
@@ -1019,6 +935,10 @@ impl BottomPaneView for ListSelectionView {
         ListSelectionView::active_tab_id(self)
     }
 
+    fn prefer_esc_to_handle_key_event(&self) -> bool {
+        true
+    }
+
     fn on_ctrl_c(&mut self) -> CancellationEvent {
         if let Some(cb) = &self.on_cancel {
             cb(&self.app_event_tx);
@@ -1042,7 +962,7 @@ impl Renderable for ListSelectionView {
         };
 
         // Measure wrapped height for up to MAX_POPUP_ROWS items.
-        let rows = self.measured_rows();
+        let rows = self.build_rows();
         let column_width = ColumnWidthConfig::new(self.col_width_mode, self.name_column_width);
         let rows_height = match self.row_display {
             SelectionRowDisplay::Wrapped => measure_rows_height_with_col_width_mode(
@@ -1120,12 +1040,11 @@ impl Renderable for ListSelectionView {
         let header = self.active_header();
         let header_height = header.desired_height(inner_width);
         let tab_height = tab_bar_height(&self.tabs, self.active_tab_idx.unwrap_or(0), inner_width);
-        let rows = self.rendered_rows();
-        let measured_rows = self.measured_rows();
+        let rows = self.build_rows();
         let column_width = ColumnWidthConfig::new(self.col_width_mode, self.name_column_width);
         let rows_height = match self.row_display {
             SelectionRowDisplay::Wrapped => measure_rows_height_with_col_width_mode(
-                &measured_rows,
+                &rows,
                 &self.state,
                 MAX_POPUP_ROWS,
                 effective_rows_width.saturating_add(1),
@@ -1321,6 +1240,8 @@ mod tests {
     use crate::app_event::AppEvent;
     use crate::bottom_pane::popup_consts::standard_popup_hint_line;
     use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use ratatui::buffer::Buffer;
@@ -1372,6 +1293,10 @@ mod tests {
         }
     }
 
+    fn new_view(params: SelectionViewParams, tx: AppEventSender) -> ListSelectionView {
+        ListSelectionView::new(params, tx, crate::keymap::RuntimeKeymap::defaults().list)
+    }
+
     fn make_selection_view(subtitle: Option<&str>) -> ListSelectionView {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
@@ -1391,7 +1316,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        ListSelectionView::new(
+        new_view(
             SelectionViewParams {
                 title: Some("Select Approval Mode".to_string()),
                 subtitle: subtitle.map(str::to_string),
@@ -1471,6 +1396,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let before_scroll = render_lines_with_width(&view, width);
@@ -1508,7 +1434,7 @@ mod tests {
             Some(&codex_home),
             Some(94),
         );
-        let view = ListSelectionView::new(params, tx);
+        let view = new_view(params, tx);
 
         let rendered = render_lines_in_area(&view, /*width*/ 94, /*height*/ 35);
         assert!(rendered.contains("Move up/down to live preview themes"));
@@ -1550,6 +1476,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         let area = Rect::new(0, 0, 120, 35);
         let mut buf = Buffer::empty(area);
@@ -1586,7 +1513,7 @@ mod tests {
             "Use /setup-default-sandbox".cyan(),
             " to allow network access.".dim(),
         ]);
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Select Approval Mode".to_string()),
                 footer_note: Some(footer_note),
@@ -1613,7 +1540,7 @@ mod tests {
             dismiss_on_select: true,
             ..Default::default()
         }];
-        let mut view = ListSelectionView::new(
+        let mut view = new_view(
             SelectionViewParams {
                 title: Some("Select Approval Mode".to_string()),
                 footer_hint: Some(standard_popup_hint_line()),
@@ -1666,6 +1593,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         view.set_search_query("beta".to_string());
 
@@ -1728,6 +1656,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         assert_eq!(view.active_tab_id(), Some("beta"));
@@ -1759,6 +1688,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         view.set_search_query("plugin".to_string());
 
@@ -1776,34 +1706,6 @@ mod tests {
             rx.try_recv().is_err(),
             "expected Space with an active search query to avoid firing the toggle action"
         );
-    }
-
-    #[test]
-    fn searchable_selection_shortcut_runs_without_updating_search_query() {
-        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
-        let tx = AppEventSender::new(tx_raw);
-        let mut view = ListSelectionView::new(
-            SelectionViewParams {
-                items: vec![SelectionItem {
-                    name: "Saved account".to_string(),
-                    shortcut_actions: vec![SelectionShortcutAction {
-                        binding: crate::key_hint::plain(KeyCode::Char('-')),
-                        action: Box::new(|tx: &_| {
-                            tx.send(AppEvent::OpenApprovalsPopup);
-                        }),
-                    }],
-                    ..Default::default()
-                }],
-                is_searchable: true,
-                ..Default::default()
-            },
-            tx,
-        );
-
-        view.handle_key_event(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE));
-
-        assert_eq!(view.search_query, "");
-        assert!(matches!(rx.try_recv(), Ok(AppEvent::OpenApprovalsPopup)));
     }
 
     #[test]
@@ -1826,6 +1728,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         let (wrapped_tx_raw, _wrapped_rx) = unbounded_channel::<AppEvent>();
         let wrapped_tx = AppEventSender::new(wrapped_tx_raw);
@@ -1844,6 +1747,7 @@ mod tests {
                 ..Default::default()
             },
             wrapped_tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let rendered = render_lines_with_width(&single_line_view, /*width*/ 36);
@@ -1899,6 +1803,7 @@ mod tests {
                 ..Default::default()
             },
             auto_tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         let (widened_tx_raw, _widened_rx) = unbounded_channel::<AppEvent>();
         let widened_tx = AppEventSender::new(widened_tx_raw);
@@ -1911,6 +1816,7 @@ mod tests {
                 ..Default::default()
             },
             widened_tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let auto_rendered = render_lines_with_width(&auto_view, /*width*/ 48);
@@ -1942,6 +1848,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
         view.set_search_query("no-matches".to_string());
 
@@ -1953,52 +1860,6 @@ mod tests {
             Ok(other) => panic!("expected OpenApprovalsPopup cancel event, got {other:?}"),
             Err(err) => panic!("expected cancel callback event, got {err}"),
         }
-    }
-
-    #[test]
-    fn selected_description_changes_do_not_change_desired_height() {
-        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
-        let tx = AppEventSender::new(tx_raw);
-        let mut view = ListSelectionView::new(
-            SelectionViewParams {
-                items: vec![
-                    SelectionItem {
-                        name: "Local MCP".to_string(),
-                        description: Some(
-                            "stdio transport with an intentionally verbose status summary that wraps"
-                                .to_string(),
-                        ),
-                        selected_description: Some("Press Enter to manage this MCP server.".to_string()),
-                        dismiss_on_select: true,
-                        ..Default::default()
-                    },
-                    SelectionItem {
-                        name: "Remote MCP".to_string(),
-                        description: Some("http".to_string()),
-                        selected_description: Some(
-                            "Press Enter to manage this MCP server and review a much longer selected-only explanation that wraps"
-                                .to_string(),
-                        ),
-                        dismiss_on_select: true,
-                        ..Default::default()
-                    },
-                ],
-                col_width_mode: ColumnWidthMode::AutoAllRows,
-                ..Default::default()
-            },
-            tx,
-        );
-
-        let width = 46;
-        let initial_height = view.desired_height(width);
-
-        view.handle_key_event(KeyEvent::from(KeyCode::Down));
-        let second_height = view.desired_height(width);
-        view.handle_key_event(KeyEvent::from(KeyCode::Down));
-        let wrapped_height = view.desired_height(width);
-
-        assert_eq!(second_height, initial_height);
-        assert_eq!(wrapped_height, initial_height);
     }
 
     #[test]
@@ -2018,6 +1879,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         while rx.try_recv().is_ok() {}
@@ -2064,6 +1926,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         assert_eq!(view.selected_actual_idx(), Some(1));
@@ -2088,6 +1951,100 @@ mod tests {
     }
 
     #[test]
+    fn c0_ctrl_p_respects_unbound_list_move_up() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut keymap = crate::keymap::RuntimeKeymap::defaults().list;
+        keymap.move_up.clear();
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![
+                    SelectionItem {
+                        name: "First".to_string(),
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Second".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                initial_selected_idx: Some(1),
+                is_searchable: true,
+                ..Default::default()
+            },
+            tx,
+            keymap,
+        );
+
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('\u{0010}'), KeyModifiers::NONE));
+
+        assert_eq!(view.selected_actual_idx(), Some(1));
+        assert_eq!(view.search_query, "");
+    }
+
+    #[test]
+    fn c0_ctrl_n_respects_unbound_list_move_down() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut keymap = crate::keymap::RuntimeKeymap::defaults().list;
+        keymap.move_down.clear();
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![
+                    SelectionItem {
+                        name: "First".to_string(),
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Second".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                is_searchable: true,
+                ..Default::default()
+            },
+            tx,
+            keymap,
+        );
+
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('\u{000e}'), KeyModifiers::NONE));
+
+        assert_eq!(view.selected_actual_idx(), Some(0));
+        assert_eq!(view.search_query, "");
+    }
+
+    #[test]
+    fn c0_ctrl_p_respects_remapped_list_move_down() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut keymap = crate::keymap::RuntimeKeymap::defaults().list;
+        keymap.move_up.clear();
+        keymap.move_down = vec![crate::key_hint::ctrl(KeyCode::Char('p'))];
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                items: vec![
+                    SelectionItem {
+                        name: "First".to_string(),
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Second".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                is_searchable: true,
+                ..Default::default()
+            },
+            tx,
+            keymap,
+        );
+
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('\u{0010}'), KeyModifiers::NONE));
+
+        assert_eq!(view.selected_actual_idx(), Some(1));
+    }
+
+    #[test]
     fn wraps_long_option_without_overflowing_columns() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
@@ -2103,7 +2060,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Approval".to_string()),
                 items,
@@ -2161,7 +2118,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Select Model and Effort".to_string()),
                 items,
@@ -2195,7 +2152,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Debug".to_string()),
                 items,
@@ -2243,7 +2200,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Select Model and Effort".to_string()),
                 items,
@@ -2270,7 +2227,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        let view = ListSelectionView::new(
+        let view = new_view(
             SelectionViewParams {
                 title: Some("Debug".to_string()),
                 items,
@@ -2321,6 +2278,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let before_scroll = render_lines_with_width(&view, /*width*/ 96);
@@ -2355,6 +2313,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let before_scroll = render_lines_with_width(&view, width);
@@ -2396,6 +2355,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let content_width: u16 = 120;
@@ -2423,6 +2383,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         assert_eq!(view.side_layout_width(/*content_width*/ 80), None);
@@ -2453,6 +2414,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let rendered = render_lines_with_width(&view, /*width*/ 70);
@@ -2487,6 +2449,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let width = 120;
@@ -2546,6 +2509,7 @@ mod tests {
                 ..Default::default()
             },
             tx,
+            crate::keymap::RuntimeKeymap::defaults().list,
         );
 
         let width = 120;
