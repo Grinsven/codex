@@ -196,14 +196,13 @@ impl From<RefreshTokenError> for std::io::Error {
 }
 
 impl CodexAuth {
-    async fn from_auth_dot_json(
+    pub(super) async fn from_auth_dot_json(
         codex_home: &Path,
         auth_dot_json: AuthDotJson,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
         chatgpt_base_url: Option<&str>,
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
-        let client = create_client();
         if auth_mode == ApiAuthMode::ApiKey {
             let Some(api_key) = auth_dot_json.openai_api_key.as_deref() else {
                 return Err(std::io::Error::other("API key auth is missing a key."));
@@ -219,7 +218,21 @@ impl CodexAuth {
             return Self::from_agent_identity_jwt(&agent_identity, chatgpt_base_url).await;
         }
 
+        Self::from_managed_chatgpt_auth_dot_json(
+            codex_home,
+            auth_dot_json,
+            auth_credentials_store_mode,
+        )
+    }
+
+    pub(super) fn from_managed_chatgpt_auth_dot_json(
+        codex_home: &Path,
+        auth_dot_json: AuthDotJson,
+        auth_credentials_store_mode: AuthCredentialsStoreMode,
+    ) -> std::io::Result<Self> {
+        let auth_mode = auth_dot_json.resolved_mode();
         let storage_mode = auth_dot_json.storage_mode(auth_credentials_store_mode);
+        let client = create_client();
         let state = ChatgptAuthState {
             auth_dot_json: Arc::new(Mutex::new(Some(auth_dot_json))),
             client,
@@ -233,8 +246,9 @@ impl CodexAuth {
             ApiAuthMode::ChatgptAuthTokens => {
                 Ok(Self::ChatgptAuthTokens(ChatgptAuthTokens { state }))
             }
-            ApiAuthMode::ApiKey => unreachable!("api key mode is handled above"),
-            ApiAuthMode::AgentIdentity => unreachable!("agent identity mode is handled above"),
+            ApiAuthMode::ApiKey | ApiAuthMode::AgentIdentity => Err(std::io::Error::other(
+                "saved ChatGPT account auth must use ChatGPT auth mode",
+            )),
         }
     }
 
@@ -393,7 +407,7 @@ impl CodexAuth {
     }
 
     /// Returns `None` if token-backed ChatGPT auth is unavailable.
-    fn get_current_auth_json(&self) -> Option<AuthDotJson> {
+    pub(super) fn get_current_auth_json(&self) -> Option<AuthDotJson> {
         let state = match self {
             Self::Chatgpt(auth) => &auth.state,
             Self::ChatgptAuthTokens(auth) => &auth.state,
@@ -969,7 +983,7 @@ impl AuthDotJson {
         Self::from_external_tokens(&external)
     }
 
-    fn resolved_mode(&self) -> ApiAuthMode {
+    pub(super) fn resolved_mode(&self) -> ApiAuthMode {
         if let Some(mode) = self.auth_mode {
             return mode;
         }
@@ -1576,6 +1590,28 @@ impl AuthManager {
         self.enable_codex_api_key_env
     }
 
+    /// Convenience constructor for callers that only need sync helpers backed by
+    /// auth storage and do not need the cached auth preloaded.
+    pub fn shared_unloaded(
+        codex_home: PathBuf,
+        auth_credentials_store_mode: AuthCredentialsStoreMode,
+        chatgpt_base_url: Option<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            codex_home,
+            inner: RwLock::new(CachedAuth {
+                auth: None,
+                permanent_refresh_failure: None,
+            }),
+            enable_codex_api_key_env: false,
+            auth_credentials_store_mode,
+            forced_chatgpt_workspace_id: RwLock::new(None),
+            chatgpt_base_url,
+            refresh_lock: Semaphore::new(/*permits*/ 1),
+            external_auth: RwLock::new(None),
+        })
+    }
+
     /// Convenience constructor returning an `Arc` wrapper.
     pub async fn shared(
         codex_home: PathBuf,
@@ -1746,6 +1782,46 @@ impl AuthManager {
         // Always reload to clear any cached auth (even if file absent).
         self.reload().await;
         Ok(removed)
+    }
+
+    pub fn list_saved_chatgpt_accounts(
+        &self,
+    ) -> std::io::Result<Vec<crate::auth::SavedChatgptAccount>> {
+        let runtime_active_auth = self.auth_cached();
+        crate::auth::saved_chatgpt_accounts::list_saved_chatgpt_accounts(
+            &self.codex_home,
+            runtime_active_auth.as_ref(),
+            self.auth_credentials_store_mode,
+        )
+    }
+
+    pub fn list_saved_chatgpt_account_auths(
+        &self,
+    ) -> std::io::Result<Vec<crate::auth::SavedChatgptAccountAuth>> {
+        let runtime_active_auth = self.auth_cached();
+        crate::auth::saved_chatgpt_accounts::list_saved_chatgpt_account_auths(
+            &self.codex_home,
+            runtime_active_auth.as_ref(),
+            self.auth_credentials_store_mode,
+        )
+    }
+
+    pub async fn switch_active_chatgpt_account(&self, account_id: &str) -> std::io::Result<()> {
+        crate::auth::saved_chatgpt_accounts::switch_active_chatgpt_account(
+            &self.codex_home,
+            account_id,
+            self.auth_credentials_store_mode,
+        )?;
+        self.reload().await;
+        Ok(())
+    }
+
+    pub fn delete_saved_chatgpt_account(&self, account_id: &str) -> std::io::Result<()> {
+        crate::auth::saved_chatgpt_accounts::delete_saved_chatgpt_account(
+            &self.codex_home,
+            account_id,
+            self.auth_credentials_store_mode,
+        )
     }
 
     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {

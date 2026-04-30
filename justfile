@@ -86,7 +86,7 @@ bazel-remote-test:
 # The all-platform //codex-rs/cli:release_binaries target currently trips the
 # Windows V8 gnullvm toolchain on macOS developer machines.
 build-for-release:
-    bazel build //codex-rs/cli:codex_macos_arm64 --config=remote --compilation_mode=opt --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none
+    bazel build //codex-rs/cli:codex_macos_arm64 --config=remote --compilation_mode=opt --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=none --@rules_rust//rust/settings:extra_rustc_flag=-Clink-arg=-Wl,--slop_scale=1000
 
 # Keep the full matrix available explicitly for CI/debugging.
 build-for-release-all-platforms:

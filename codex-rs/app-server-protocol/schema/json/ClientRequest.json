@@ -5,25 +5,6 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
-    "AccountListParams": {
-      "properties": {
-        "cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "limit": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "AccountSwitchParams": {
       "properties": {
         "savedAccountId": {
@@ -1809,18 +1790,6 @@
       "required": [
         "name"
       ],
-      "type": "object"
-    },
-    "McpServerRefreshParams": {
-      "properties": {
-        "cwd": {
-          "description": "Optional working directory used to resolve project-local config layers.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "McpServerStatusDetail": {
@@ -5737,13 +5706,12 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/definitions/McpServerRefreshParams"
+          "type": "null"
         }
       },
       "required": [
         "id",
-        "method",
-        "params"
+        "method"
       ],
       "title": "Config/mcpServer/reloadRequest",
       "type": "object"
@@ -5913,6 +5881,30 @@
         "method"
       ],
       "title": "Account/logoutRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/switch"
+          ],
+          "title": "Account/switchRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AccountSwitchParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/switchRequest",
       "type": "object"
     },
     {
@@ -6251,54 +6243,6 @@
         "params"
       ],
       "title": "Account/readRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/list"
-          ],
-          "title": "Account/listRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/AccountListParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "Account/listRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/switch"
-          ],
-          "title": "Account/switchRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/AccountSwitchParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "Account/switchRequest",
       "type": "object"
     },
     {

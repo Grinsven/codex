@@ -135,12 +135,6 @@ pub(crate) enum AppEvent {
         label: String,
     },
 
-    /// Delete a saved ChatGPT account from the account picker.
-    DeleteSavedChatgptAccount {
-        account_id: String,
-        label: String,
-    },
-
     /// Loaded saved ChatGPT account picker rate-limit cache updates.
     SavedChatgptAccountRateLimitsLoaded {
         updates: Vec<crate::account_picker::SavedChatgptAccountRateLimitCacheUpdate>,

@@ -2,17 +2,12 @@ use chrono::DateTime;
 use chrono::Duration as ChronoDuration;
 use chrono::Local;
 use codex_login::SavedChatgptAccount;
-use crossterm::event::KeyCode;
-use ratatui::text::Line;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
-use crate::bottom_pane::SelectionShortcutAction;
 use crate::bottom_pane::SelectionViewParams;
-use crate::bottom_pane::popup_consts::standard_popup_hint_line;
-use crate::key_hint;
 use crate::status::RATE_LIMIT_STALE_THRESHOLD_MINUTES;
 use crate::status::RateLimitSnapshotDisplay;
 use crate::status::RateLimitWindowDisplay;
@@ -41,7 +36,7 @@ pub(crate) fn account_selection_params(
         view_id: Some(ACCOUNT_SELECTION_VIEW_ID),
         title: Some("Switch ChatGPT account".to_string()),
         subtitle: Some("Choose a saved ChatGPT account for this session.".to_string()),
-        footer_hint: Some(account_picker_hint_line()),
+        footer_hint: None,
         items,
         is_searchable: true,
         search_placeholder: Some("Type to search accounts".to_string()),
@@ -130,8 +125,6 @@ fn selection_item_for_account(
     let is_current = account.is_active;
     let account_id = account.id;
     let action_label = label.clone();
-    let delete_account_id = account_id.clone();
-    let delete_label = label.clone();
 
     let actions: Vec<SelectionAction> = if is_current {
         Vec::new()
@@ -143,38 +136,16 @@ fn selection_item_for_account(
             });
         })]
     };
-    let shortcut_actions = vec![SelectionShortcutAction {
-        binding: key_hint::plain(KeyCode::Char('-')),
-        action: Box::new(move |tx: &AppEventSender| {
-            tx.send(AppEvent::DeleteSavedChatgptAccount {
-                account_id: delete_account_id.clone(),
-                label: delete_label.clone(),
-            });
-        }),
-    }];
-
     SelectionItem {
         name: label,
         description,
         selected_description,
         is_current,
         actions,
-        shortcut_actions,
         dismiss_on_select: true,
         search_value: Some(search_value),
         ..Default::default()
     }
-}
-
-fn account_picker_hint_line() -> Line<'static> {
-    let mut spans = standard_popup_hint_line().spans;
-    spans.extend([
-        " · ".into(),
-        "Press ".into(),
-        key_hint::plain(KeyCode::Char('-')).into(),
-        " to delete saved account".into(),
-    ]);
-    Line::from(spans)
 }
 
 pub(crate) fn account_label(account: &SavedChatgptAccount) -> String {

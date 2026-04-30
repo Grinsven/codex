@@ -65,55 +65,6 @@
         }
       ]
     },
-    "AccountListParams": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "properties": {
-        "cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "limit": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "title": "AccountListParams",
-      "type": "object"
-    },
-    "AccountListResponse": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "properties": {
-        "activeSavedAccountId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "data": {
-          "items": {
-            "$ref": "#/definitions/SavedAccountSummary"
-          },
-          "type": "array"
-        },
-        "nextCursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "data"
-      ],
-      "title": "AccountListResponse",
-      "type": "object"
-    },
     "AccountLoginCompletedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -2255,13 +2206,12 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/McpServerRefreshParams"
+              "type": "null"
             }
           },
           "required": [
             "id",
-            "method",
-            "params"
+            "method"
           ],
           "title": "Config/mcpServer/reloadRequest",
           "type": "object"
@@ -2431,6 +2381,30 @@
             "method"
           ],
           "title": "Account/logoutRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/switch"
+              ],
+              "title": "Account/switchRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountSwitchParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/switchRequest",
           "type": "object"
         },
         {
@@ -2769,54 +2743,6 @@
             "params"
           ],
           "title": "Account/readRequest",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "id": {
-              "$ref": "#/definitions/RequestId"
-            },
-            "method": {
-              "enum": [
-                "account/list"
-              ],
-              "title": "Account/listRequestMethod",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AccountListParams"
-            }
-          },
-          "required": [
-            "id",
-            "method",
-            "params"
-          ],
-          "title": "Account/listRequest",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "id": {
-              "$ref": "#/definitions/RequestId"
-            },
-            "method": {
-              "enum": [
-                "account/switch"
-              ],
-              "title": "Account/switchRequestMethod",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AccountSwitchParams"
-            }
-          },
-          "required": [
-            "id",
-            "method",
-            "params"
-          ],
-          "title": "Account/switchRequest",
           "type": "object"
         },
         {
@@ -7635,20 +7561,6 @@
       "title": "McpServerOauthLoginResponse",
       "type": "object"
     },
-    "McpServerRefreshParams": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "properties": {
-        "cwd": {
-          "description": "Optional working directory used to resolve project-local config layers.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "title": "McpServerRefreshParams",
-      "type": "object"
-    },
     "McpServerRefreshResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "McpServerRefreshResponse",
@@ -10781,21 +10693,6 @@
           "type": "array"
         }
       },
-      "type": "object"
-    },
-    "SavedAccountSummary": {
-      "properties": {
-        "account": {
-          "$ref": "#/definitions/Account"
-        },
-        "savedAccountId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "account",
-        "savedAccountId"
-      ],
       "type": "object"
     },
     "SendAddCreditsNudgeEmailParams": {

@@ -81,7 +81,7 @@ pub(crate) fn list_saved_chatgpt_account_auths(
     )?
     .into_iter()
     .map(|entry| {
-        let auth = CodexAuth::from_auth_dot_json(
+        let auth = CodexAuth::from_managed_chatgpt_auth_dot_json(
             codex_home,
             entry.auth_dot_json,
             auth_credentials_store_mode,
@@ -183,7 +183,16 @@ fn list_saved_chatgpt_account_entries(
 ) -> std::io::Result<Vec<SavedChatgptAccountEntry>> {
     let saved_accounts =
         sync_saved_chatgpt_accounts_with_active_auth(codex_home, auth_credentials_store_mode)?;
-    let active_id = runtime_active_auth.and_then(saved_chatgpt_account_id_for_runtime_auth);
+    let active_auth_from_storage;
+    let active_id = if let Some(runtime_active_auth) = runtime_active_auth {
+        saved_chatgpt_account_id_for_runtime_auth(runtime_active_auth)
+    } else {
+        active_auth_from_storage =
+            load_managed_chatgpt_auth_from_active_storage(codex_home, auth_credentials_store_mode)?;
+        active_auth_from_storage
+            .as_ref()
+            .and_then(saved_chatgpt_account_id)
+    };
 
     let mut entries = saved_accounts
         .accounts

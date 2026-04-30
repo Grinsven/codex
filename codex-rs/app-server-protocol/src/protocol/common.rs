@@ -836,6 +836,12 @@ client_request_definitions! {
         response: v2::LogoutAccountResponse,
     },
 
+    AccountSwitch => "account/switch" {
+        params: v2::AccountSwitchParams,
+        serialization: global("account-auth"),
+        response: v2::AccountSwitchResponse,
+    },
+
     GetAccountRateLimits => "account/rateLimits/read" {
         params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
         serialization: None,

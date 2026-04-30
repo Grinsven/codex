@@ -29,6 +29,8 @@ use codex_analytics::InputError;
 use codex_analytics::TurnSteerRequestError;
 use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AccountLoginCompletedNotification;
+use codex_app_server_protocol::AccountSwitchParams;
+use codex_app_server_protocol::AccountSwitchResponse;
 use codex_app_server_protocol::AccountUpdatedNotification;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
@@ -435,6 +437,15 @@ const THREAD_LIST_MAX_LIMIT: usize = 100;
 const THREAD_TURNS_DEFAULT_LIMIT: usize = 25;
 const THREAD_TURNS_MAX_LIMIT: usize = 100;
 
+fn active_saved_chatgpt_account_id(auth_manager: &AuthManager) -> Option<String> {
+    auth_manager
+        .list_saved_chatgpt_accounts()
+        .ok()?
+        .into_iter()
+        .find(|account| account.is_active)
+        .map(|account| account.id)
+}
+
 struct ThreadListFilters {
     model_providers: Option<Vec<String>>,
     source_kinds: Option<Vec<ThreadSourceKind>>,
@@ -776,6 +787,7 @@ impl CodexMessageProcessor {
         AccountUpdatedNotification {
             auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
             plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            active_saved_account_id: active_saved_chatgpt_account_id(&self.auth_manager),
         }
     }
 
@@ -1247,6 +1259,10 @@ impl CodexMessageProcessor {
                 params: _,
             } => {
                 self.logout_v2(to_connection_request_id(request_id)).await;
+            }
+            ClientRequest::AccountSwitch { request_id, params } => {
+                self.switch_account(to_connection_request_id(request_id), params)
+                    .await;
             }
             ClientRequest::CancelLoginAccount { request_id, params } => {
                 self.cancel_login_v2(to_connection_request_id(request_id), params)
@@ -1822,11 +1838,56 @@ impl CodexMessageProcessor {
             let payload_v2 = AccountUpdatedNotification {
                 auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                active_saved_account_id: active_saved_chatgpt_account_id(&auth_manager),
             };
             outgoing
                 .send_server_notification(ServerNotification::AccountUpdated(payload_v2))
                 .await;
         }
+    }
+
+    async fn switch_account(&self, request_id: ConnectionRequestId, params: AccountSwitchParams) {
+        let result = self.switch_account_response(params).await;
+        let account_updated = result
+            .as_ref()
+            .ok()
+            .map(|_| self.current_account_updated_notification());
+
+        self.outgoing.send_result(request_id, result).await;
+
+        if let Some(payload) = account_updated {
+            self.outgoing
+                .send_server_notification(ServerNotification::AccountUpdated(payload))
+                .await;
+        }
+    }
+
+    async fn switch_account_response(
+        &self,
+        params: AccountSwitchParams,
+    ) -> Result<AccountSwitchResponse, JSONRPCErrorError> {
+        self.auth_manager
+            .switch_active_chatgpt_account(&params.saved_account_id)
+            .await
+            .map_err(|err| invalid_request(format!("failed to switch account: {err}")))?;
+        self.config_manager.replace_cloud_requirements_loader(
+            self.auth_manager.clone(),
+            self.config.chatgpt_base_url.clone(),
+        );
+        self.config_manager
+            .sync_default_client_residency_requirement()
+            .await;
+
+        let account = self
+            .get_account_response(GetAccountParams {
+                refresh_token: false,
+            })
+            .await?;
+        Ok(AccountSwitchResponse {
+            account: account.account,
+            requires_openai_auth: account.requires_openai_auth,
+            active_saved_account_id: account.active_saved_account_id,
+        })
     }
 
     async fn logout_common(&self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
@@ -1867,6 +1928,7 @@ impl CodexMessageProcessor {
                 .map(|auth_mode| AccountUpdatedNotification {
                     auth_mode,
                     plan_type: None,
+                    active_saved_account_id: active_saved_chatgpt_account_id(&self.auth_manager),
                 });
         self.outgoing
             .send_result(request_id, result.map(|_| LogoutAccountResponse {}))
@@ -1987,6 +2049,7 @@ impl CodexMessageProcessor {
         Ok(GetAccountResponse {
             account,
             requires_openai_auth: account_state.requires_openai_auth,
+            active_saved_account_id: active_saved_chatgpt_account_id(&self.auth_manager),
         })
     }
 

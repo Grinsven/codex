@@ -1522,10 +1522,6 @@ impl App {
                     }
                 }
             }
-            AppEvent::DeleteSavedChatgptAccount { account_id, label } => {
-                self.chat_widget
-                    .delete_saved_chatgpt_account(account_id, label);
-            }
             AppEvent::SavedChatgptAccountRateLimitsLoaded { updates } => {
                 self.chat_widget
                     .on_saved_chatgpt_account_rate_limits_loaded(updates);
