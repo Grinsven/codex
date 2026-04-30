@@ -3208,24 +3208,22 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
 }
 
 #[tokio::test]
-async fn side_thread_ignores_global_mcp_startup_notifications() {
+async fn inactive_thread_mcp_startup_notifications_do_not_surface_in_current_tui() {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     while app_event_rx.try_recv().is_ok() {}
     let app_server = crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
         .await
         .expect("embedded app server");
-    let parent_thread_id = ThreadId::new();
-    let side_thread_id = ThreadId::new();
-    app.primary_thread_id = Some(parent_thread_id);
-    app.active_thread_id = Some(side_thread_id);
-    app.side_threads
-        .insert(side_thread_id, SideThreadState::new(parent_thread_id));
-    app.sync_side_thread_ui();
+    let active_thread_id = ThreadId::new();
+    let child_thread_id = ThreadId::new();
+    app.primary_thread_id = Some(active_thread_id);
+    app.active_thread_id = Some(active_thread_id);
 
     app.handle_app_server_event(
         &app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                thread_id: child_thread_id.to_string(),
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
                 error: Some("sentry is not logged in".to_string()),
@@ -3235,6 +3233,7 @@ async fn side_thread_ignores_global_mcp_startup_notifications() {
     .await;
 
     assert!(app_event_rx.try_recv().is_err());
+    assert!(!app.chat_widget.bottom_pane.is_task_running());
 }
 
 #[tokio::test]

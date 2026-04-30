@@ -58,6 +58,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -70,6 +71,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -87,6 +89,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -99,6 +102,7 @@ async fn app_server_mcp_startup_failure_renders_warning_history() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -147,6 +151,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -155,6 +160,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -163,6 +169,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -184,6 +191,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -196,6 +204,7 @@ async fn app_server_mcp_startup_lag_settles_startup_and_ignores_late_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -217,6 +226,7 @@ async fn app_server_mcp_startup_after_lag_can_settle_without_starting_updates() 
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -233,6 +243,7 @@ async fn app_server_mcp_startup_after_lag_can_settle_without_starting_updates() 
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -256,6 +267,7 @@ async fn app_server_mcp_startup_after_lag_preserves_partial_terminal_only_round(
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -264,6 +276,7 @@ async fn app_server_mcp_startup_after_lag_preserves_partial_terminal_only_round(
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -272,6 +285,7 @@ async fn app_server_mcp_startup_after_lag_preserves_partial_terminal_only_round(
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -286,6 +300,7 @@ async fn app_server_mcp_startup_after_lag_preserves_partial_terminal_only_round(
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -300,6 +315,7 @@ async fn app_server_mcp_startup_after_lag_preserves_partial_terminal_only_round(
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -323,6 +339,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -331,6 +348,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -339,6 +357,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -353,6 +372,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some(
@@ -365,6 +385,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -376,6 +397,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -387,6 +409,7 @@ async fn app_server_mcp_startup_next_round_discards_stale_terminal_updates() {
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -412,6 +435,7 @@ async fn app_server_mcp_startup_next_round_keeps_terminal_statuses_after_startin
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -422,6 +446,7 @@ async fn app_server_mcp_startup_next_round_keeps_terminal_statuses_after_startin
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -437,6 +462,7 @@ async fn app_server_mcp_startup_next_round_keeps_terminal_statuses_after_startin
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -448,6 +474,7 @@ async fn app_server_mcp_startup_next_round_keeps_terminal_statuses_after_startin
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
@@ -472,6 +499,7 @@ async fn app_server_mcp_startup_next_round_with_empty_expected_servers_reactivat
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "runtime".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -483,6 +511,7 @@ async fn app_server_mcp_startup_next_round_with_empty_expected_servers_reactivat
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "runtime".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `runtime` failed to start: handshake failed".to_string()),
@@ -574,6 +603,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -582,6 +612,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -590,6 +621,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
     );
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Starting,
             error: None,
@@ -604,6 +636,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some(
@@ -618,6 +651,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "alpha".to_string(),
             status: McpServerStartupState::Failed,
             error: Some("MCP client for `alpha` failed to start: handshake failed".to_string()),
@@ -634,6 +668,7 @@ async fn app_server_mcp_startup_next_round_after_lag_can_settle_without_starting
 
     chat.handle_server_notification(
         ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
             name: "beta".to_string(),
             status: McpServerStartupState::Ready,
             error: None,
